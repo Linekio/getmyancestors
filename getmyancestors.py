@@ -628,23 +628,29 @@ class Indi:
         res = []
         famc = False
         url = "/platform/tree/persons/%s/ordinances.json" % self.fid
-        data = self.tree.fs.get_url(url)["persons"][0]["ordinances"]
+        data = self.tree.fs.get_url(url)
         if data:
-            for o in data:
-                if o["type"] == "http://lds.org/Baptism":
-                    self.baptism = Ordinance(o)
-                elif o["type"] == "http://lds.org/Confirmation":
-                    self.confirmation = Ordinance(o)
-                elif o["type"] == "http://lds.org/Initiatory":
-                    self.initiatory = Ordinance(o)
-                elif o["type"] == "http://lds.org/Endowment":
-                    self.endowment = Ordinance(o)
-                elif o["type"] == "http://lds.org/SealingChildToParents":
-                    self.sealing_child = Ordinance(o)
-                    if "parent1" in o and "parent2" in o:
-                        famc = (o["parent1"]["resourceId"], o["parent2"]["resourceId"])
-                elif o["type"] == "http://lds.org/SealingToSpouse":
-                    res.append(o)
+            if "ordinances" in data["persons"][0]:
+                for o in data["persons"][0]["ordinances"]:
+                    if o["type"] == "http://lds.org/Baptism":
+                        self.baptism = Ordinance(o)
+                    elif o["type"] == "http://lds.org/Confirmation":
+                        self.confirmation = Ordinance(o)
+                    elif o["type"] == "http://lds.org/Initiatory":
+                        self.initiatory = Ordinance(o)
+                    elif o["type"] == "http://lds.org/Endowment":
+                        self.endowment = Ordinance(o)
+                    elif o["type"] == "http://lds.org/SealingChildToParents":
+                        self.sealing_child = Ordinance(o)
+                        if "parent1" in o and "parent2" in o:
+                            famc = (o["parent1"]["resourceId"], o["parent2"]["resourceId"])
+                    elif o["type"] == "http://lds.org/SealingToSpouse":
+                        res.append(o)
+            else:
+                print("No ordinance data for url " + url)
+        else:
+            print("No ordinances for " + str(self.fid))
+
         return res, famc
 
     def get_contributors(self):
