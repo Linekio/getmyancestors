@@ -1214,7 +1214,7 @@ def main():
         tree.add_indis(todo)
 
         # download ancestors
-        todo = set(todo)
+        todo = set(tree.indi.keys())
         done = set()
         for i in range(args.ascend):
             if not todo:
