@@ -1158,7 +1158,7 @@ def main():
         parser.error = parser.exit
         args = parser.parse_args()
     except SystemExit:
-        parser.print_help()
+        parser.print_help(file=sys.stderr)
         sys.exit(2)
     if args.individuals:
         for fid in args.individuals:
@@ -1194,7 +1194,7 @@ def main():
             print("Unable to write %s: %s" % (settings_name, repr(exc)), file=sys.stderr)
 
     # initialize a FamilySearch session and a family tree object
-    print("Login to FamilySearch...")
+    print("Login to FamilySearch...", file=sys.stderr)
     fs = Session(args.username, args.password, args.verbose, args.logfile, args.timeout)
     if not fs.logged:
         sys.exit(2)
@@ -1210,7 +1210,7 @@ def main():
     try:
         # add list of starting individuals to the family tree
         todo = args.individuals if args.individuals else [fs.fid]
-        print(_("Downloading starting individuals..."))
+        print(_("Downloading starting individuals..."), file=sys.stderr)
         tree.add_indis(todo)
 
         # download ancestors
@@ -1220,7 +1220,8 @@ def main():
             if not todo:
                 break
             done |= todo
-            print(_("Downloading %s. of generations of ancestors...") % (i + 1))
+            print(_("Downloading %s. of generations of ancestors...") % (i + 1),
+                  file=sys.stderr)
             todo = tree.add_parents(todo) - done
 
         # download descendants
@@ -1230,12 +1231,14 @@ def main():
             if not todo:
                 break
             done |= todo
-            print(_("Downloading %s. of generations of descendants...") % (i + 1))
+            print(_("Downloading %s. of generations of descendants...") %
+                  (i + 1), file=sys.stderr)
             todo = tree.add_children(todo) - done
 
         # download spouses
         if args.marriage:
-            print(_("Downloading spouses and marriage information..."))
+            print(_("Downloading spouses and marriage information..."),
+                  file=sys.stderr)
             todo = set(tree.indi.keys())
             tree.add_spouses(todo)
 
@@ -1264,7 +1267,8 @@ def main():
                 else ""
             )
             + (_(" and contributors") if args.get_contributors else "")
-            + "..."
+            + "...",
+            file=sys.stderr
         )
         loop.run_until_complete(download_stuff(loop))
 
@@ -1284,7 +1288,8 @@ def main():
                 str(len(tree.notes)),
                 str(round(time.time() - time_count)),
                 str(fs.counter),
-            )
+            ),
+            file=sys.stderr
         )
 
 
