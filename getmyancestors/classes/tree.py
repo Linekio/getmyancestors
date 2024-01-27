@@ -440,6 +440,7 @@ class Indi:
             for entries in data["entries"]:
                 for contributors in entries["contributors"]:
                     temp.add(contributors["name"])
+                    temp.add(contributors["uri"])
         if temp:
             text = "=== %s ===\n%s" % (
                 self.tree.fs._("Contributors"),
