@@ -436,16 +436,51 @@ class Indi:
         temp = set()
         url = "/platform/tree/persons/%s/changes" % self.fid
         data = self.tree.fs.get_url(url, {"Accept": "application/x-gedcomx-atom+json"})
+        # To reduce calls to the FamilySearch API, first gather the list of contributor 
+        # names, which map to their agent URI; after all the contributor names have been 
+        # gathered, then get the contributor information (email, phone) for each unique one 
+        d = {} # dictionary to store contributor names and corresponding agent URIs
+        agent_data = ""
+        agent_url = ""
         if data:
             for entries in data["entries"]:
                 for contributors in entries["contributors"]:
+                    d[contributors["name"]] = contributors["uri"].replace("https://www.familysearch.org","")
                     temp.add(contributors["name"])
-                    temp.add(contributors["uri"])
         if temp:
-            text = "=== %s ===\n%s" % (
+            text = "=== %s ===\n" % (
                 self.tree.fs._("Contributors"),
-                "\n".join(sorted(temp)),
             )
+            for name in sorted(temp):
+                text += name
+                agent_url = d[name]
+                # I don't know why, but this get_url() request didn't work 
+                # with {"Accept": "application/x-gedcomx-atom+json"}, but 
+                # it did work with the default headers.
+                agent_data = self.tree.fs.get_url(agent_url)   
+                # If the contributor has a display name that is different than the username, add it in parentheses
+                try: 
+                    display_name = ""
+                    if (agent_data["agents"][0]["names"]):    
+                        for n in agent_data["agents"][0]["names"]:
+                            display_name += n["value"] + " "
+                        display_name = display_name[:-1] # Remove trailing space after final name
+                        if (display_name != name):
+                            text += " ("+display_name+")"                        
+                except: 
+                    pass
+                # If the contributor has an email address, add that
+                try: 
+                    text += agent_data["agents"][0]["emails"][0]["resource"].replace("mailto:"," ") 
+                except: 
+                    pass
+                # If the contributor has a phone number, add that
+                try: 
+                    text += agent_data["agents"][0]["phones"][0]["resource"].replace("tel:"," ")
+                except: 
+                    pass
+                text += "\n"
+                
             for n in self.tree.notes:
                 if n.text == text:
                     self.notes.add(n)
