@@ -5,7 +5,7 @@ _getmyancestors_ is a python3 package that downloads family trees in GEDCOM form
 
 This program is now in production phase, but bugs might still be present. Features will be added on request. It is provided as is.
 
-The project is maintained at https://github.com/Linekio/getmyancestors. Visit here for the latest version and more information.
+The project is maintained at https://github.com/Linekio/getmyancestors. Visit there for the latest version and more information.
 
 This script requires python3 and the modules indicated in the requirements.txt file. To install the modules, run in your terminal:
 
@@ -17,9 +17,9 @@ The easiest way to install _getmyancestors_ is to use pip:
 
 `pip install getmyancestors`
 
-Otherwise, you can download the source package and then execute:
+Alternatively, you can download the source package and then execute:
 
-`python3 setup.py install`
+`python3 -m pip install getmyancestors/`
 
 How to use
 ==========
