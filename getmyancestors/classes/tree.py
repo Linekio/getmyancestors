@@ -634,7 +634,7 @@ class Tree:
     :param fs: a Session object
     """
 
-    def __init__(self, fs=None):
+    def __init__(self, fs=None, exclude=None):
         self.fs = fs
         self.indi = dict()
         self.fam = dict()
@@ -642,14 +642,23 @@ class Tree:
         self.sources = dict()
         self.places = dict()
         self.display_name = self.lang = None
+        self.exclude = exclude or []
         if fs:
             self.display_name = fs.display_name
             self.lang = babelfish.Language.fromalpha2(fs.lang).name
 
-    def add_indis(self, fids):
+    def add_indis(self, fids_in):
         """add individuals to the family tree
         :param fids: an iterable of fid
         """
+        fids = []
+        for fid in fids_in:
+            if fid not in self.exclude:
+                fids.append(fid)
+            else:
+                print(
+                    "Excluding %s from the family tree" % fid, file=sys.stderr
+                )
 
         async def add_datas(loop, data):
             futures = set()

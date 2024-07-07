@@ -36,6 +36,14 @@ def main():
         help="List of individual FamilySearch IDs for whom to retrieve ancestors",
     )
     parser.add_argument(
+        "-e",
+        "--exclude",
+        metavar="<STR>",
+        nargs="+",
+        type=str,
+        help="List of individual FamilySearch IDs to exclude from the tree",
+    )
+    parser.add_argument(
         "-a",
         "--ascend",
         metavar="<INT>",
@@ -132,6 +140,10 @@ def main():
         for fid in args.individuals:
             if not re.match(r"[A-Z0-9]{4}-[A-Z0-9]{3}", fid):
                 sys.exit("Invalid FamilySearch ID: " + fid)
+    if args.exclude:
+        for fid in args.exclude:
+            if not re.match(r"[A-Z0-9]{4}-[A-Z0-9]{3}", fid):
+                sys.exit("Invalid FamilySearch ID: " + fid)
 
     args.username = (
         args.username if args.username else input("Enter FamilySearch username: ")
@@ -177,7 +189,7 @@ def main():
     if not fs.logged:
         sys.exit(2)
     _ = fs._
-    tree = Tree(fs)
+    tree = Tree(fs, exclude=args.exclude)
 
     # check LDS account
     if args.get_ordinances:
