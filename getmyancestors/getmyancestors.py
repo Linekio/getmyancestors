@@ -60,6 +60,19 @@ def main():
         help="Number of generations to descend [0]",
     )
     parser.add_argument(
+        '--distance',
+        metavar="<INT>",
+        type=int,
+        default=0,
+        help="The maxium distance from the starting individuals [0]. If distance is set, ascend and descend will be ignored.",
+    )
+    # parser.add_argument(
+    #     '--only-blood-relatives',
+    #     action="store_true",
+    #     default=False,
+    #     help="Only include blood relatives in the tree [False]",
+    # )
+    parser.add_argument(
         "-m",
         "--marriage",
         action="store_true",
@@ -205,37 +218,59 @@ def main():
         print(_("Downloading starting individuals..."), file=sys.stderr)
         tree.add_indis(todo)
 
+
+
         # download ancestors
-        todo = set(tree.indi.keys())
-        done = set()
-        for i in range(args.ascend):
-            if not todo:
-                break
-            done |= todo
-            print(
-                _("Downloading %s. of generations of ancestors...") % (i + 1),
-                file=sys.stderr,
-            )
-            todo = tree.add_parents(todo) - done
-
-        # download descendants
-        todo = set(tree.indi.keys())
-        done = set()
-        for i in range(args.descend):
-            if not todo:
-                break
-            done |= todo
-            print(
-                _("Downloading %s. of generations of descendants...") % (i + 1),
-                file=sys.stderr,
-            )
-            todo = tree.add_children(todo) - done
-
-        # download spouses
-        if args.marriage:
-            print(_("Downloading spouses and marriage information..."), file=sys.stderr)
+        if args.distance == 0:
             todo = set(tree.indi.keys())
-            tree.add_spouses(todo)
+            done = set()
+            for i in range(args.ascend):
+                if not todo:
+                    break
+                done |= todo
+                print(
+                    _("Downloading %s. of generations of ancestors...") % (i + 1),
+                    file=sys.stderr,
+                )
+                todo = tree.add_parents(todo) - done
+
+            # download descendants
+            todo = set(tree.indi.keys())
+            done = set()
+            for i in range(args.descend):
+                if not todo:
+                    break
+                done |= todo
+                print(
+                    _("Downloading %s. of generations of descendants...") % (i + 1),
+                    file=sys.stderr,
+                )
+                todo = tree.add_children(todo) - done
+
+            # download spouses
+            if args.marriage:
+                print(_("Downloading spouses and marriage information..."), file=sys.stderr)
+                todo = set(tree.indi.keys())
+                tree.add_spouses(todo)
+
+        else:
+            todo = set(tree.indi.keys())
+            done = set()
+            for distance in range(args.distance):
+
+                if not todo:
+                    break
+                done |= todo
+                print(
+                    _("Downloading individuals at distance %s...") % (distance + 1),
+                    file=sys.stderr,
+                )
+                todo = set(tree.indi.keys())
+                done = set()
+                parents = tree.add_parents(todo) - done
+                children = tree.add_children(todo) - done
+                spouses = tree.add_children(todo) - done
+                todo = parents | children | spouses
 
         # download ordinances, notes and contributors
         async def download_stuff(loop):
