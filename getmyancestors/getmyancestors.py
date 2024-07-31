@@ -66,12 +66,12 @@ def main():
         default=0,
         help="The maxium distance from the starting individuals [0]. If distance is set, ascend and descend will be ignored.",
     )
-    # parser.add_argument(
-    #     '--only-blood-relatives',
-    #     action="store_true",
-    #     default=False,
-    #     help="Only include blood relatives in the tree [False]",
-    # )
+    parser.add_argument(
+        '--only-blood-relatives',
+        action="store_true",
+        default=True,
+        help="Only include blood relatives in the tree [False]",
+    )
     parser.add_argument(
         "-m",
         "--marriage",
@@ -254,23 +254,38 @@ def main():
                 tree.add_spouses(todo)
 
         else:
-            todo = set(tree.indi.keys())
+            todo_bloodline = set(tree.indi.keys())
+            todo_others = set()
             done = set()
             for distance in range(args.distance):
 
-                if not todo:
+                if not todo_bloodline and not todo_others:
                     break
-                done |= todo
+                done |= todo_bloodline
                 print(
                     _("Downloading individuals at distance %s...") % (distance + 1),
                     file=sys.stderr,
                 )
-                todo = set(tree.indi.keys())
-                done = set()
-                parents = tree.add_parents(todo) - done
-                children = tree.add_children(todo) - done
-                spouses = tree.add_children(todo) - done
-                todo = parents | children | spouses
+                parents = tree.add_parents(todo_bloodline) - done
+                children = tree.add_children(todo_bloodline) - done
+
+                # download spouses
+                if args.marriage:
+                    print(_("Downloading spouses and marriage information..."), file=sys.stderr)
+                    todo = set(tree.indi.keys())
+                    tree.add_spouses(todo)
+
+                # spouses = tree.add_spouses(todo_bloodline) - done
+
+                todo_bloodline = parents | children
+                # if args.only_blood_relatives:
+                #     # Downloading non bloodline parents
+                #     tree.add_parents(todo_others)
+
+                #     # TODO what is a non bloodline person becomes bloodline on another branch?
+                #     todo_others = spouses
+                # else:
+                    # todo_bloodline |= spouses
 
         # download ordinances, notes and contributors
         async def download_stuff(loop):

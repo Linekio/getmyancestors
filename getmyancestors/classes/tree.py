@@ -50,26 +50,34 @@ class Note:
     :param num: the GEDCOM identifier
     """
 
-    counter = 0
+    counter = {}
 
-    def __init__(self, text="", tree=None, num=None):
+    def __init__(self, text="", tree=None, num=None, num_perfix=None):
+        self.num_prefix = num_perfix
         if num:
             self.num = num
         else:
-            Note.counter += 1
-            self.num = Note.counter
+            Note.counter[num_perfix or 'None'] = Note.counter.get(num_perfix or 'None', 0) + 1
+            self.num = Note.counter[num_perfix or 'None']
+        print(f'##### Creating Note: {num_perfix}, {self.num}', file=sys.stderr)
         self.text = text.strip()
 
         if tree:
             tree.notes.append(self)
 
+    @property
+    def id(self):
+        return f'{self.num_prefix}_{self.num}' if self.num_prefix != None else self.num
+
     def print(self, file=sys.stdout):
         """print Note in GEDCOM format"""
-        file.write(cont("0 @N%s@ NOTE %s" % (self.num, self.text)))
+        print(f'Note: {self.text}', file=sys.stderr)
+        file.write(cont("0 @N%s@ NOTE %s" % (self.id, self.text)))
 
     def link(self, file=sys.stdout, level=1):
         """print the reference in GEDCOM format"""
-        file.write("%s NOTE @N%s@\n" % (level, self.num))
+        print(f'Linking Note: {self.id}', file=sys.stderr)
+        file.write("%s NOTE @N%s@\n" % (level, self.id))
 
 
 class Source:
@@ -103,13 +111,17 @@ class Source:
             if "titles" in data:
                 self.title = data["titles"][0]["value"]
             if "notes" in data:
-                for n in data["notes"]:
-                    if n["text"]:
-                        self.notes.add(Note(n["text"], self.tree))
+                notes = [ n['text'] for n in data["notes"] if n["text"] ]
+                for idx, n in enumerate(notes):
+                    self.notes.add(Note(n, self.tree, num="S%s-%s" % (self.id, idx)))
+
+    @property
+    def id(self):
+        return self.fid or self.num
 
     def print(self, file=sys.stdout):
         """print Source in GEDCOM format"""
-        file.write("0 @S%s@ SOUR \n" % self.num)
+        file.write("0 @S%s@ SOUR \n" % self.id)
         if self.title:
             file.write(cont("1 TITL " + self.title))
         if self.citation:
@@ -122,7 +134,7 @@ class Source:
 
     def link(self, file=sys.stdout, level=1):
         """print the reference in GEDCOM format"""
-        file.write("%s SOUR @S%s@\n" % (level, self.num))
+        file.write("%s SOUR @S%s@\n" % (level, self.id))
 
 
 class Fact:
@@ -131,7 +143,7 @@ class Fact:
     :param tree: a tree object
     """
 
-    def __init__(self, data=None, tree=None):
+    def __init__(self, data=None, tree=None, num_prefix=None):
         self.value = self.type = self.date = self.place = self.note = self.map = None
         if data:
             if "value" in data:
@@ -152,7 +164,7 @@ class Fact:
                 if "description" in place and place["description"][1:] in tree.places:
                     self.map = tree.places[place["description"][1:]]
             if "changeMessage" in data["attribution"]:
-                self.note = Note(data["attribution"]["changeMessage"], tree)
+                self.note = Note(data["attribution"]["changeMessage"], tree, num_perfix=num_prefix)
             if self.type == "http://gedcomx.org/Death" and not (
                 self.date or self.place
             ):
@@ -215,12 +227,14 @@ class Name:
     :param tree: a Tree object
     """
 
-    def __init__(self, data=None, tree=None):
+    def __init__(self, data=None, tree=None, owner_fis=None, kind=None):
         self.given = ""
         self.surname = ""
         self.prefix = None
         self.suffix = None
         self.note = None
+        self.owner_fis = owner_fis
+        self.kind = kind
         if data:
             if "parts" in data["nameForms"][0]:
                 for z in data["nameForms"][0]["parts"]:
@@ -233,7 +247,7 @@ class Name:
                     if z["type"] == "http://gedcomx.org/Suffix":
                         self.suffix = z["value"]
             if "changeMessage" in data["attribution"]:
-                self.note = Note(data["attribution"]["changeMessage"], tree)
+                self.note = Note(data["attribution"]["changeMessage"], tree, num_perfix=f'NAME_{owner_fis}_{kind}')
 
     def print(self, file=sys.stdout, typ=None):
         """print Name in GEDCOM format
@@ -298,6 +312,8 @@ class Indi:
         self.fams_fid = set()
         self.famc_num = set()
         self.fams_num = set()
+        self.famc_ids = set()
+        self.fams_ids = set()
         self.name = None
         self.gender = None
         self.living = None
@@ -321,16 +337,16 @@ class Indi:
             self.living = data["living"]
             for x in data["names"]:
                 if x["preferred"]:
-                    self.name = Name(x, self.tree)
+                    self.name = Name(x, self.tree, self.fid, "preferred")
                 else:
                     if x["type"] == "http://gedcomx.org/Nickname":
-                        self.nicknames.add(Name(x, self.tree))
+                        self.nicknames.add(Name(x, self.tree, self.fid, "nickname"))
                     if x["type"] == "http://gedcomx.org/BirthName":
-                        self.birthnames.add(Name(x, self.tree))
+                        self.birthnames.add(Name(x, self.tree, self.fid, "birthname"))
                     if x["type"] == "http://gedcomx.org/AlsoKnownAs":
-                        self.aka.add(Name(x, self.tree))
+                        self.aka.add(Name(x, self.tree, self.fid, "aka"))
                     if x["type"] == "http://gedcomx.org/MarriedName":
-                        self.married.add(Name(x, self.tree))
+                        self.married.add(Name(x, self.tree, self.fid, "married"))
             if "gender" in data:
                 if data["gender"]["type"] == "http://gedcomx.org/Male":
                     self.gender = "M"
@@ -346,10 +362,11 @@ class Indi:
                                 "=== %s ===\n%s"
                                 % (self.tree.fs._("Life Sketch"), x.get("value", "")),
                                 self.tree,
+                                num_perfix=f'INDI_{self.fid}'
                             )
                         )
                     else:
-                        self.facts.add(Fact(x, self.tree))
+                        self.facts.add(Fact(x, self.tree, num_prefix=f'INDI_{self.fid}'))
             if "sources" in data:
                 sources = self.tree.fs.get_url(
                     "/platform/tree/persons/%s/sources" % self.fid
@@ -380,7 +397,7 @@ class Indi:
                                 for val in x.get("titles", [])
                                 + x.get("descriptions", [])
                             )
-                            self.notes.add(Note(text, self.tree))
+                            self.notes.add(Note(text, self.tree, num_perfix=f'INDI_{self.fid}'))
                         else:
                             self.memories.add(Memorie(x))
 
@@ -399,7 +416,7 @@ class Indi:
             for n in notes["persons"][0]["notes"]:
                 text_note = "=== %s ===\n" % n["subject"] if "subject" in n else ""
                 text_note += n["text"] + "\n" if "text" in n else ""
-                self.notes.add(Note(text_note, self.tree))
+                self.notes.add(Note(text_note, self.tree, num_perfix=f'INDI_{self.fid}'))
 
     def get_ordinances(self):
         """retrieve LDS ordinances
@@ -451,11 +468,15 @@ class Indi:
                 if n.text == text:
                     self.notes.add(n)
                     return
-            self.notes.add(Note(text, self.tree))
+            self.notes.add(Note(text, self.tree, num_perfix=f'INDI_{self.fid}_CONTRIB'))
+
+    @property
+    def id(self):
+        return self.fid or self.num
 
     def print(self, file=sys.stdout):
         """print individual in GEDCOM format"""
-        file.write("0 @I%s@ INDI\n" % self.num)
+        file.write("0 @I%s@ INDI\n" % self.id)
         if self.name:
             self.name.print(file)
         for o in self.nicknames:
@@ -487,9 +508,11 @@ class Indi:
         if self.sealing_child:
             file.write("1 SLGC\n")
             self.sealing_child.print(file)
-        for num in self.fams_num:
+        print(f'Fams Ids: {self.fams_ids}, {self.fams_fid}, {self.fams_num}', file=sys.stderr)
+        for num in self.fams_ids:
             file.write("1 FAMS @F%s@\n" % num)
-        for num in self.famc_num:
+        print(f'Famc Ids: {self.famc_ids}', file=sys.stderr)
+        for num in self.famc_ids:
             file.write("1 FAMC @F%s@\n" % num)
         file.write("1 _FSFTID %s\n" % self.fid)
         for o in self.notes:
@@ -543,7 +566,7 @@ class Fam:
             if data:
                 if "facts" in data["relationships"][0]:
                     for x in data["relationships"][0]["facts"]:
-                        self.facts.add(Fact(x, self.tree))
+                        self.facts.add(Fact(x, self.tree, num_prefix=f'FAM_{self.fid}'))
                 if "sources" in data["relationships"][0]:
                     quotes = dict()
                     for x in data["relationships"][0]["sources"]:
@@ -580,7 +603,7 @@ class Fam:
                 for n in notes["relationships"][0]["notes"]:
                     text_note = "=== %s ===\n" % n["subject"] if "subject" in n else ""
                     text_note += n["text"] + "\n" if "text" in n else ""
-                    self.notes.add(Note(text_note, self.tree))
+                    self.notes.add(Note(text_note, self.tree, num_perfix=f'FAM_{self.fid}'))
 
     def get_contributors(self):
         """retrieve contributors"""
@@ -603,17 +626,33 @@ class Fam:
                     if n.text == text:
                         self.notes.add(n)
                         return
-                self.notes.add(Note(text, self.tree))
+                self.notes.add(Note(text, self.tree, num_perfix=f'FAM_{self.fid}_CONTRIB'))
+
+    @property
+    def id(self):
+        return self.fid if self.fid else self.num
+    
+    @property
+    def husband_id(self):
+        return self.husb_fid or self.husb_num
+    
+    @property
+    def wife_id(self):
+        return self.wife_fid or self.wife_num
+    
+    @property
+    def children_ids(self):
+        return self.chil_fid or self.chil_num
 
     def print(self, file=sys.stdout):
         """print family information in GEDCOM format"""
-        file.write("0 @F%s@ FAM\n" % self.num)
+        file.write("0 @F%s@ FAM\n" % self.id)
         if self.husb_num:
-            file.write("1 HUSB @I%s@\n" % self.husb_num)
+            file.write("1 HUSB @I%s@\n" % self.husband_id)
         if self.wife_num:
-            file.write("1 WIFE @I%s@\n" % self.wife_num)
-        for num in self.chil_num:
-            file.write("1 CHIL @I%s@\n" % num)
+            file.write("1 WIFE @I%s@\n" % self.wife_id)
+        for child_id in self.children_ids:
+            file.write("1 CHIL @I%s@\n" % child_id)
         for o in self.facts:
             o.print(file)
         if self.sealing_spouse:
@@ -847,6 +886,12 @@ class Tree:
             )
             self.indi[fid].fams_num = set(
                 self.fam[(husb, wife)].num for husb, wife in self.indi[fid].fams_fid
+            )            
+            self.indi[fid].famc_ids = set(
+                self.fam[(husb, wife)].id for husb, wife in self.indi[fid].famc_fid
+            )
+            self.indi[fid].fams_ids = set(
+                self.fam[(husb, wife)].id for husb, wife in self.indi[fid].fams_fid
             )
 
     def print(self, file=sys.stdout):
@@ -864,7 +909,7 @@ class Tree:
         file.write("1 SUBM @SUBM@\n")
         file.write("0 @SUBM@ SUBM\n")
         file.write("1 NAME %s\n" % self.display_name)
-        file.write("1 LANG %s\n" % self.lang)
+        # file.write("1 LANG %s\n" % self.lang)
 
         for fid in sorted(self.indi, key=lambda x: self.indi.__getitem__(x).num):
             self.indi[fid].print(file)
@@ -873,10 +918,10 @@ class Tree:
         sources = sorted(self.sources.values(), key=lambda x: x.num)
         for s in sources:
             s.print(file)
-        notes = sorted(self.notes, key=lambda x: x.num)
+        notes = sorted(self.notes, key=lambda x: x.id)
         for i, n in enumerate(notes):
             if i > 0:
-                if n.num == notes[i - 1].num:
+                if n.id == notes[i - 1].id:
                     continue
             n.print(file)
         file.write("0 TRLR\n")
