@@ -108,6 +108,14 @@ def main():
         default=60,
         help="Timeout in seconds [60]",
     )
+
+    parser.add_argument(
+        "-x",
+        "--xml",
+        action="store_true",
+        default=False,
+        help="To print the output in Gramps XML format [False]",
+    )
     parser.add_argument(
         "--show-password",
         action="store_true",
@@ -120,13 +128,20 @@ def main():
         default=False,
         help="Save settings into file [False]",
     )
+    parser.add_argument(
+        "-g",
+        "--geonames",
+        metavar="<STR>",
+        type=str,
+        help="Geonames.org username in order to download place data",
+    )
     try:
         parser.add_argument(
             "-o",
             "--outfile",
             metavar="<FILE>",
-            type=argparse.FileType("w", encoding="UTF-8"),
-            default=sys.stdout,
+            # type=argparse.FileType("w", encoding="UTF-8"),
+            # default=sys.stdout,
             help="output GEDCOM file [stdout]",
         )
         parser.add_argument(
@@ -202,7 +217,11 @@ def main():
     if not fs.logged:
         sys.exit(2)
     _ = fs._
-    tree = Tree(fs, exclude=args.exclude)
+    tree = Tree(
+        fs, 
+        exclude=args.exclude,
+        geonames_key=args.geonames,
+    )
 
     # check LDS account
     if args.get_ordinances:
@@ -320,7 +339,12 @@ def main():
     finally:
         # compute number for family relationships and print GEDCOM file
         tree.reset_num()
-        tree.print(args.outfile)
+        if args.xml:
+            with open(args.outfile, "wb") as f:
+                tree.printxml(f)
+        else:
+            with open(args.outfile, "w", encoding="UTF-8") as f:
+                tree.print(f)
         print(
             _(
                 "Downloaded %s individuals, %s families, %s sources and %s notes "
