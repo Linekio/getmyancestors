@@ -4,13 +4,15 @@ import time
 from urllib.parse import urlparse, parse_qs
 
 import requests
+from requests_cache import CachedSession
 from fake_useragent import UserAgent
 
 # local imports
 from getmyancestors.classes.translation import translations
 
 
-class Session(requests.Session):
+# class Session(requests.Session):
+class Session(CachedSession):
     """Create a FamilySearch session
     :param username and password: valid FamilySearch credentials
     :param verbose: True to active verbose mode
@@ -19,7 +21,8 @@ class Session(requests.Session):
     """
 
     def __init__(self, username, password, verbose=False, logfile=False, timeout=60):
-        super().__init__()
+        super().__init__('http_cache', backend='filesystem', expire_after=86400)
+        # super().__init__()
         self.username = username
         self.password = password
         self.verbose = verbose
