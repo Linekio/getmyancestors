@@ -3,14 +3,15 @@ import re
 import time
 import asyncio
 import os
-from urllib.parse import unquote
+from urllib.parse import unquote, unquote_plus
 from datetime import datetime
-from typing import Set, Dict, List, Tuple, Union, Optional, BinaryIO
+from typing import Set, Dict, List, Tuple, Union, Optional, BinaryIO, Any
 # global imports
 import babelfish
 import geocoder
 import requests
 import xml.etree.cElementTree as ET
+from xml.etree.cElementTree import Element
 from requests_cache import CachedSession
 
 # local imports
@@ -140,7 +141,7 @@ class Note:
 
         return self._handle
 
-    def printxml(self, parent_element):
+    def printxml(self, parent_element: Element) -> None:
         note_element = ET.SubElement(
             parent_element,
             'note', 
@@ -167,6 +168,8 @@ class Source:
             Source.counter += 1
             self.num = Source.counter
 
+        self._handle = None
+
         self.tree = tree
         self.url = self.citation = self.title = self.fid = None
         self.notes = set()
@@ -190,10 +193,19 @@ class Source:
                         num="S%s-%s" % (self.id, idx),
                         note_type='Source Note'
                     ))
+            self.modified = data['attribution']['modified']
 
     @property
     def id(self):
-        return self.fid or self.num
+        return 'S' + str(self.fid or self.num)
+    
+
+    @property
+    def handle(self):
+        if not self._handle:
+            self._handle = '_' + os.urandom(10).hex()
+
+        return self._handle
 
     def print(self, file=sys.stdout):
         """print Source in GEDCOM format"""
@@ -212,6 +224,30 @@ class Source:
         """print the reference in GEDCOM format"""
         file.write("%s SOUR @S%s@\n" % (level, self.id))
 
+    def printxml(self, parent_element: Element) -> None:
+        
+    #         <source handle="_fa593c277b471380bbcc5282e8f" change="1720382301" id="SQ8M5-NSP">
+    #   <stitle>Palkovics Cser József, &quot;Hungary Civil Registration, 1895-1980&quot;</stitle>
+    #   <sauthor>&quot;Hungary Civil Registration, 1895-1980&quot;, , &lt;i&gt;FamilySearch&lt;/i&gt; (https://www.familysearch.org/ark:/61903/1:1:6JBQ-NKWD : Thu Mar 07 10:23:43 UTC 2024), Entry for Palkovics Cser József and Palkovics Cser István, 27 Aug 1928.</sauthor>
+    #   <spubinfo>https://familysearch.org/ark:/61903/1:1:6JBQ-NKWD</spubinfo>
+    #   <srcattribute type="REFN" value="Q8M5-NSP"/>
+    # </source>
+        source_element = ET.SubElement(
+            parent_element,
+            'source',
+            handle=self.handle,
+            change=str(int(self.modified / 1000)),
+            id=self.id
+        )
+        if self.title:
+            ET.SubElement(source_element, 'stitle').text = self.title
+        if self.citation:
+            ET.SubElement(source_element, 'sauthor').text = self.citation
+        if self.url:
+            ET.SubElement(source_element, 'spubinfo').text = self.url
+        if self.fid:
+            ET.SubElement(source_element, 'srcattribute', type='REFN', value=self.fid)
+
 
 class Fact:
     """GEDCOM Fact class
@@ -223,27 +259,39 @@ class Fact:
 
     def __init__(self, data=None, tree: Optional['Tree']=None, num_prefix=None):
         self.value = self.type = self.date = None
+        self.date_type = None
         self.place: Optional[Place] = None
         self.note = None
         self._handle: Optional[str] = None
-        self.num_prefix = num_prefix
-
-        Fact.counter[num_prefix or 'None'] = Fact.counter.get(num_prefix or 'None', 0) + 1
-        self.num = Fact.counter[num_prefix or 'None']
-        
         if data:
             if "value" in data:
                 self.value = data["value"]
             if "type" in data:
                 self.type = data["type"]
+                self.fs_type = self.type
                 if self.type in FACT_EVEN:
                     self.type = tree.fs._(FACT_EVEN[self.type])
                 elif self.type[:6] == "data:,":
                     self.type = unquote(self.type[6:])
                 elif self.type not in FACT_TAGS:
                     self.type = None
+
+
+        self.num_prefix = f'{num_prefix}_{FACT_TAGS[self.type]}' if num_prefix and self.type in FACT_TAGS else num_prefix
+        Fact.counter[self.num_prefix or 'None'] = Fact.counter.get(self.num_prefix or 'None', 0) + 1
+        self.num = Fact.counter[self.num_prefix or 'None']
+        if data:
             if "date" in data:
-                self.date = data["date"]["original"]
+                if 'formal' in data['date']:
+                    self.date = data['date']['formal'].split('+')[-1].split('/')[0]
+                    if data['date']['formal'].startswith('A+'):
+                        self.date_type = 'about'
+                    if data['date']['formal'].startswith('/+'):
+                        self.date_type = 'before'
+                    if data['date']['formal'].endswith('/'):
+                        self.date_type = 'after'
+                else:
+                    self.date = data["date"]["original"]
             if "place" in data:
                 place = data["place"]
                 place_name = place["original"]
@@ -253,15 +301,17 @@ class Fact:
                 self.note = Note(
                     data["attribution"]["changeMessage"], 
                     tree,
-                    num_prefix='E' + num_prefix if num_prefix else None,
+                    num_prefix='E' + self.num_prefix if self.num_prefix else None,
                     note_type='Event Note',
                 )
             if self.type == "http://gedcomx.org/Death" and not (
                 self.date or self.place
             ):
                 self.value = "Y"
+
         if tree:
             tree.facts.add(self)
+        
 
     @property
     def id(self):
@@ -284,9 +334,20 @@ class Fact:
             # change='1720382301',
             id=self.id
         )
-        ET.SubElement(event_element, 'type').text = FACT_TAGS.get(self.type, self.type)
+
+        ET.SubElement(event_element, 'type').text = (
+            unquote_plus(self.type[len('http://gedcomx.org/'):])
+            if self.type.startswith('http://gedcomx.org/')
+            else self.type
+        )
+        # FACT_TAGS.get(self.type, self.type)
         if self.date:
-            ET.SubElement(event_element, 'datestr', val=self.date)
+            params={
+                'val': self.date,
+            }
+            if self.date_type is not None:
+                params['type'] = self.date_type
+            ET.SubElement(event_element, 'datestr', **params)
         if self.place:
             ET.SubElement(event_element, 'place', hlink=self.place.handle)
         if self.note:
@@ -343,18 +404,27 @@ class Memorie:
             file.write(cont("2 FILE " + self.url))
 
 
+NAME_MAP = {
+    "preferred" : 'Preeferred Name',
+    "nickname" : 'Nickname',
+    "birthname": 'Birth Name',
+    "aka": 'Also Known As',
+    "married": 'Married Name',
+}
+
 class Name:
     """GEDCOM Name class
     :param data: FS Name data
     :param tree: a Tree object
     """
 
-    def __init__(self, data=None, tree=None, owner_fis=None, kind=None):
+    def __init__(self, data=None, tree=None, owner_fis=None, kind=None, alternative: bool=False):
         self.given = ""
         self.surname = ""
         self.prefix = None
         self.suffix = None
         self.note = None
+        self.alternative = alternative
         self.owner_fis = owner_fis
         self.kind = kind
         if data:
@@ -377,8 +447,12 @@ class Name:
                 )
 
     def printxml(self, parent_element):
-
-        person_name = ET.SubElement(parent_element, 'name', type=self.kind)
+        params = {}
+        if self.kind is not None:
+            params['type'] = NAME_MAP.get(self.kind, self.kind)
+        if self.alternative:
+            params['alt'] = '1'
+        person_name = ET.SubElement(parent_element, 'name', **params)
         ET.SubElement(person_name, 'first').text = self.given
         ET.SubElement(person_name, 'surname').text = self.surname
         # TODO prefix / suffix
@@ -488,6 +562,46 @@ class Ordinance:
         if self.famc:
             file.write("2 FAMC @F%s@\n" % self.famc.num)
 
+class Citation:
+
+    def __init__(self, data: Dict[str, Any], source: Source):
+        self._handle = None
+        self.id = data["id"]
+        self.source = source
+        self.message = (
+            data["attribution"]["changeMessage"]
+            if "changeMessage" in data["attribution"]
+            else None
+        )
+        # TODO create citation note out of this.
+        self.modified = data['attribution']['modified']
+
+    
+    @property
+    def handle(self):
+        if not self._handle:
+            self._handle = '_' + os.urandom(10).hex()
+
+        return self._handle
+
+    def printxml(self, parent_element: Element):
+        
+#     <citation handle="_fac4a72a01b1681293ea1ee8d9" change="1723265781" id="C0000">
+#       <dateval val="1998-05-03"/>
+#       <confidence>2</confidence>
+#       <noteref hlink="_fac4a71ac2c6c5749abd6a0bd72"/>
+#       <sourceref hlink="_fac4a70566329a02afcc10731f5"/>
+#     </citation>
+        citation_element = ET.SubElement(
+            parent_element,
+            'citation',
+            handle=self.handle,
+            change=str(int(self.modified / 1000)),
+            id='C' + str(self.id)
+        )
+        ET.SubElement(citation_element, 'confidence').text = '2'
+        ET.SubElement(citation_element, 'sourceref', hlink=self.source.handle)
+
 
 class Indi:
     """GEDCOM individual class
@@ -529,7 +643,8 @@ class Indi:
         self.aka: Set[Name] = set()
         self.facts: Set[Fact] = set()
         self.notes: Set[Note] = set()
-        self.sources: Set[Source] = set()
+        # self.sources: Set[Source] = set()
+        self.citations: Set[Citation] = set()
         self.memories = set()
 
     def add_data(self, data):
@@ -537,17 +652,18 @@ class Indi:
         if data:
             self.living = data["living"]
             for x in data["names"]:
-                if x["preferred"]:
-                    self.name = Name(x, self.tree, self.fid, "preferred")
+                alt = not x.get('preferred', False)
+                if x["type"] == "http://gedcomx.org/Nickname":
+                    self.nicknames.add(Name(x, self.tree, self.fid, "nickname", alt))
+                elif x["type"] == "http://gedcomx.org/BirthName":
+                    self.birthnames.add(Name(x, self.tree, self.fid, "birthname", alt))
+                elif x["type"] == "http://gedcomx.org/AlsoKnownAs":
+                    self.aka.add(Name(x, self.tree, self.fid, "aka", alt))
+                elif x["type"] == "http://gedcomx.org/MarriedName":
+                    self.married.add(Name(x, self.tree, self.fid, "married", alt))
                 else:
-                    if x["type"] == "http://gedcomx.org/Nickname":
-                        self.nicknames.add(Name(x, self.tree, self.fid, "nickname"))
-                    if x["type"] == "http://gedcomx.org/BirthName":
-                        self.birthnames.add(Name(x, self.tree, self.fid, "birthname"))
-                    if x["type"] == "http://gedcomx.org/AlsoKnownAs":
-                        self.aka.add(Name(x, self.tree, self.fid, "aka"))
-                    if x["type"] == "http://gedcomx.org/MarriedName":
-                        self.married.add(Name(x, self.tree, self.fid, "married"))
+                    print('Unknown name type: ' + x.get('type'), file=sys.stderr)
+                    raise 'Unknown name type'
             if "gender" in data:
                 if data["gender"]["type"] == "http://gedcomx.org/Male":
                     self.gender = "M"
@@ -576,17 +692,16 @@ class Indi:
                 if sources:
                     quotes = dict()
                     for quote in sources["persons"][0]["sources"]:
-                        quotes[quote["descriptionId"]] = (
-                            quote["attribution"]["changeMessage"]
-                            if "changeMessage" in quote["attribution"]
-                            else None
+                        source_id = quote["descriptionId"]
+                        source_data = next(
+                            (s for s in sources['sourceDescriptions'] if s['id'] == source_id),
+                            None,
                         )
-                    for source in sources["sourceDescriptions"]:
-                        if source["id"] not in self.tree.sources:
-                            self.tree.sources[source["id"]] = Source(source, self.tree)
-                        self.sources.add(
-                            (self.tree.sources[source["id"]], quotes[source["id"]])
-                        )
+                        source = self.tree.ensure_source(source_data)
+                        if source:
+                            citation = self.tree.ensure_citation(quote, source)
+                            self.citations.add(citation)
+
             for evidence in data.get("evidence", []):
                 memory_id, *_ = evidence["id"].partition("-")
                 url = "/platform/memories/memories/%s" % memory_id
@@ -743,8 +858,9 @@ class Indi:
         for fact in self.facts:
             ET.SubElement(person, 'eventref', hlink=fact.handle, role='Primary')
 
-        # TODO citations
-        # TODO notes
+        for citation in self.citations:
+            ET.SubElement(person, 'citationref', hlink=citation.handle)
+
         for note in self.notes:
             ET.SubElement(person, 'noteref', hlink=note.handle)
 
@@ -980,19 +1096,20 @@ class Tree:
     :param fs: a Session object
     """
 
-    def __init__(self, fs: Optional[requests.Session]=None, exclude=None, geonames_key=None):
+    def __init__(self, fs: Optional[requests.Session]=None, exclude: List[str]=None, geonames_key=None):
         self.fs = fs
         self.geonames_key = geonames_key
         self.indi: Dict[str, Indi] = dict()
         self.fam: Dict[str, Fam] = dict()
         self.notes = list()
         self.facts: Set[Fact] = set()
-        self.sources = dict()
+        self.sources: Dict[str, Source] = dict()
+        self.citations: Dict[str, Citation] = dict()
         self.places: List[Place] = []
         self.places_by_names: Dict[str, Place] = dict()
         self.place_cache: Dict[str, Tuple[float, float]] = dict()
         self.display_name = self.lang = None
-        self.exclude = exclude or []
+        self.exclude: List[str] = exclude or []
         self.place_counter = 0
         if fs:
             self.display_name = fs.display_name
@@ -1066,8 +1183,17 @@ class Tree:
                                 )
             new_fids = new_fids[MAX_PERSONS:]
 
-
+    def ensure_source(self, source_data: Dict[str, Any]) -> Source:
+        if source_data["id"] not in self.sources:
+            self.sources[source_data["id"]] = Source(source_data, self)
+        return self.sources.get(source_data["id"])
     
+    def ensure_citation(self, data: Dict[str, Any], source: Source) -> Citation:
+        citation_id = data["id"]
+        if citation_id not in self.citations:
+            self.citations[citation_id] = Citation(data, source)
+        return self.citations[citation_id]
+
     def ensure_family(self, father: Optional['Indi'], mother: Optional['Indi']) -> Fam:
         fam_id = Fam.gen_id(father, mother)
         if fam_id not in self.fam:
@@ -1205,6 +1331,8 @@ class Tree:
         async def add(loop, rels: Set[Tuple[str, str, str]]):
             futures = set()
             for father, mother, relfid in rels:
+                if father in self.exclude or mother in self.exclude:
+                    continue
                 fam_id = Fam.gen_id(self.indi[father], self.indi[mother])
                 if self.fam.get(fam_id):
                     futures.add(
@@ -1346,6 +1474,14 @@ class Tree:
         places = ET.SubElement(root, "places")
         for place in self.places:
             place.printxml(places)
+
+        sources = ET.SubElement(root, "sources")
+        for source in self.sources.values():
+            source.printxml(sources)
+
+        citations = ET.SubElement(root, "citations")
+        for citation in self.citations.values():
+            citation.printxml(citations)
 
         tree = ET.ElementTree(root)
 

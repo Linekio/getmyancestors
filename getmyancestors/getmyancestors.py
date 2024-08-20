@@ -13,6 +13,7 @@ import argparse
 # local imports
 from getmyancestors.classes.tree import Tree
 from getmyancestors.classes.session import Session
+from getmyancestors.classes.session import CachedSession
 
 
 def main():
@@ -78,6 +79,12 @@ def main():
         action="store_true",
         default=False,
         help="Add spouses and couples information [False]",
+    )
+    parser.add_argument(
+        "--cache",
+        action="store_true",
+        default=False,
+        help="Use of http cache to reduce requests during testing [False]",
     )
     parser.add_argument(
         "-r",
@@ -213,7 +220,11 @@ def main():
 
     # initialize a FamilySearch session and a family tree object
     print("Login to FamilySearch...", file=sys.stderr)
-    fs = Session(args.username, args.password, args.verbose, args.logfile, args.timeout)
+    if args.cache:
+        print("Using cache...", file=sys.stderr)
+        fs = CachedSession(args.username, args.password, args.verbose, args.logfile, args.timeout)
+    else:
+        fs = Session(args.username, args.password, args.verbose, args.logfile, args.timeout)
     if not fs.logged:
         sys.exit(2)
     _ = fs._

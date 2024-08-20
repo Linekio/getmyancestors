@@ -3,6 +3,14 @@
 # Subject to change: see https://www.familysearch.org/developers/docs/api/tree/Persons_resource
 MAX_PERSONS = 200
 
+FACT_TAG_EVENT_TYPE = {
+    'BIRT': 'Birth',
+    'DEAT': 'Death',
+    'BURI': 'Burial',
+    'CREM': 'Cremation',
+    'NATU': 'Naturalization',
+}
+
 FACT_TAGS = {
     "http://gedcomx.org/Birth": "BIRT",
     "http://gedcomx.org/Christening": "CHR",
