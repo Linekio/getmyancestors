@@ -65,9 +65,7 @@ def main():
             fid = ged.indi[num].fid
             if fid not in tree.indi:
                 indi_counter += 1
-                tree.indi[fid] = Indi(tree=tree, num=indi_counter)
-                tree.indi[fid].tree = tree
-                tree.indi[fid].fid = ged.indi[num].fid
+                tree.indi[fid] = Indi(ged.indi[num].fid, tree, num=indi_counter)
             tree.indi[fid].fams_fid |= ged.indi[num].fams_fid
             tree.indi[fid].famc_fid |= ged.indi[num].famc_fid
             tree.indi[fid].name = ged.indi[num].name

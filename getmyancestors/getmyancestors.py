@@ -13,6 +13,7 @@ import argparse
 # local imports
 from getmyancestors.classes.tree import Tree
 from getmyancestors.classes.session import Session
+from getmyancestors.classes.session import CachedSession
 
 
 def main():
@@ -36,6 +37,14 @@ def main():
         help="List of individual FamilySearch IDs for whom to retrieve ancestors",
     )
     parser.add_argument(
+        "-e",
+        "--exclude",
+        metavar="<STR>",
+        nargs="+",
+        type=str,
+        help="List of individual FamilySearch IDs to exclude from the tree",
+    )
+    parser.add_argument(
         "-a",
         "--ascend",
         metavar="<INT>",
@@ -52,11 +61,30 @@ def main():
         help="Number of generations to descend [0]",
     )
     parser.add_argument(
+        '--distance',
+        metavar="<INT>",
+        type=int,
+        default=0,
+        help="The maxium distance from the starting individuals [0]. If distance is set, ascend and descend will be ignored.",
+    )
+    parser.add_argument(
+        '--only-blood-relatives',
+        action="store_true",
+        default=True,
+        help="Only include blood relatives in the tree [False]",
+    )
+    parser.add_argument(
         "-m",
         "--marriage",
         action="store_true",
         default=False,
         help="Add spouses and couples information [False]",
+    )
+    parser.add_argument(
+        "--cache",
+        action="store_true",
+        default=False,
+        help="Use of http cache to reduce requests during testing [False]",
     )
     parser.add_argument(
         "-r",
@@ -87,6 +115,14 @@ def main():
         default=60,
         help="Timeout in seconds [60]",
     )
+
+    parser.add_argument(
+        "-x",
+        "--xml",
+        action="store_true",
+        default=False,
+        help="To print the output in Gramps XML format [False]",
+    )
     parser.add_argument(
         "--show-password",
         action="store_true",
@@ -99,13 +135,20 @@ def main():
         default=False,
         help="Save settings into file [False]",
     )
+    parser.add_argument(
+        "-g",
+        "--geonames",
+        metavar="<STR>",
+        type=str,
+        help="Geonames.org username in order to download place data",
+    )
     try:
         parser.add_argument(
             "-o",
             "--outfile",
             metavar="<FILE>",
-            type=argparse.FileType("w", encoding="UTF-8"),
-            default=sys.stdout,
+            # type=argparse.FileType("w", encoding="UTF-8"),
+            # default=sys.stdout,
             help="output GEDCOM file [stdout]",
         )
         parser.add_argument(
@@ -130,6 +173,10 @@ def main():
         sys.exit(2)
     if args.individuals:
         for fid in args.individuals:
+            if not re.match(r"[A-Z0-9]{4}-[A-Z0-9]{3}", fid):
+                sys.exit("Invalid FamilySearch ID: " + fid)
+    if args.exclude:
+        for fid in args.exclude:
             if not re.match(r"[A-Z0-9]{4}-[A-Z0-9]{3}", fid):
                 sys.exit("Invalid FamilySearch ID: " + fid)
 
@@ -173,11 +220,19 @@ def main():
 
     # initialize a FamilySearch session and a family tree object
     print("Login to FamilySearch...", file=sys.stderr)
-    fs = Session(args.username, args.password, args.verbose, args.logfile, args.timeout)
+    if args.cache:
+        print("Using cache...", file=sys.stderr)
+        fs = CachedSession(args.username, args.password, args.verbose, args.logfile, args.timeout)
+    else:
+        fs = Session(args.username, args.password, args.verbose, args.logfile, args.timeout)
     if not fs.logged:
         sys.exit(2)
     _ = fs._
-    tree = Tree(fs)
+    tree = Tree(
+        fs, 
+        exclude=args.exclude,
+        geonames_key=args.geonames,
+    )
 
     # check LDS account
     if args.get_ordinances:
@@ -193,37 +248,74 @@ def main():
         print(_("Downloading starting individuals..."), file=sys.stderr)
         tree.add_indis(todo)
 
+
+
         # download ancestors
-        todo = set(tree.indi.keys())
-        done = set()
-        for i in range(args.ascend):
-            if not todo:
-                break
-            done |= todo
-            print(
-                _("Downloading %s. of generations of ancestors...") % (i + 1),
-                file=sys.stderr,
-            )
-            todo = tree.add_parents(todo) - done
-
-        # download descendants
-        todo = set(tree.indi.keys())
-        done = set()
-        for i in range(args.descend):
-            if not todo:
-                break
-            done |= todo
-            print(
-                _("Downloading %s. of generations of descendants...") % (i + 1),
-                file=sys.stderr,
-            )
-            todo = tree.add_children(todo) - done
-
-        # download spouses
-        if args.marriage:
-            print(_("Downloading spouses and marriage information..."), file=sys.stderr)
+        if args.distance == 0:
             todo = set(tree.indi.keys())
-            tree.add_spouses(todo)
+            done = set()
+            for i in range(args.ascend):
+                if not todo:
+                    break
+                done |= todo
+                print(
+                    _("Downloading %s. of generations of ancestors...") % (i + 1),
+                    file=sys.stderr,
+                )
+                todo = tree.add_parents(todo) - done
+
+            # download descendants
+            todo = set(tree.indi.keys())
+            done = set()
+            for i in range(args.descend):
+                if not todo:
+                    break
+                done |= todo
+                print(
+                    _("Downloading %s. of generations of descendants...") % (i + 1),
+                    file=sys.stderr,
+                )
+                todo = tree.add_children(todo) - done
+
+            # download spouses
+            if args.marriage:
+                print(_("Downloading spouses and marriage information..."), file=sys.stderr)
+                todo = set(tree.indi.keys())
+                tree.add_spouses(todo)
+
+        else:
+            todo_bloodline = set(tree.indi.keys())
+            todo_others = set()
+            done = set()
+            for distance in range(args.distance):
+
+                if not todo_bloodline and not todo_others:
+                    break
+                done |= todo_bloodline
+                print(
+                    _("Downloading individuals at distance %s...") % (distance + 1),
+                    file=sys.stderr,
+                )
+                parents = tree.add_parents(todo_bloodline) - done
+                children = tree.add_children(todo_bloodline) - done
+
+                # download spouses
+                if args.marriage:
+                    print(_("Downloading spouses and marriage information..."), file=sys.stderr)
+                    todo = set(tree.indi.keys())
+                    tree.add_spouses(todo)
+
+                # spouses = tree.add_spouses(todo_bloodline) - done
+
+                todo_bloodline = parents | children
+                # if args.only_blood_relatives:
+                #     # Downloading non bloodline parents
+                #     tree.add_parents(todo_others)
+
+                #     # TODO what is a non bloodline person becomes bloodline on another branch?
+                #     todo_others = spouses
+                # else:
+                    # todo_bloodline |= spouses
 
         # download ordinances, notes and contributors
         async def download_stuff(loop):
@@ -258,7 +350,12 @@ def main():
     finally:
         # compute number for family relationships and print GEDCOM file
         tree.reset_num()
-        tree.print(args.outfile)
+        if args.xml:
+            with open(args.outfile, "wb") as f:
+                tree.printxml(f)
+        else:
+            with open(args.outfile, "w", encoding="UTF-8") as f:
+                tree.print(f)
         print(
             _(
                 "Downloaded %s individuals, %s families, %s sources and %s notes "

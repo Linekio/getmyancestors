@@ -1,15 +1,18 @@
 # global imports
 import sys
 import time
+from urllib.parse import urlparse, parse_qs
 
 import requests
+from requests_cache import CachedSession as CSession
 from fake_useragent import UserAgent
 
 # local imports
 from getmyancestors.classes.translation import translations
 
 
-class Session(requests.Session):
+# class Session(requests.Session):
+class GMASession:
     """Create a FamilySearch session
     :param username and password: valid FamilySearch credentials
     :param verbose: True to active verbose mode
@@ -18,7 +21,8 @@ class Session(requests.Session):
     """
 
     def __init__(self, username, password, verbose=False, logfile=False, timeout=60):
-        super().__init__()
+        # super().__init__('http_cache', backend='filesystem', expire_after=86400)
+        # super().__init__()
         self.username = username
         self.password = password
         self.verbose = verbose
@@ -66,7 +70,11 @@ class Session(requests.Session):
                     data = res.json()
                 except ValueError:
                     self.write_log("Invalid auth request")
-                    continue
+                    self.write_log(res.headers)
+                    self.write_log(res.text)
+                    
+                    raise "Invalid auth request"
+                    # continue
                 if "loginError" in data:
                     self.write_log(data["loginError"])
                     return
@@ -78,6 +86,37 @@ class Session(requests.Session):
                 self.write_log("Downloading: " + url)
                 res = self.get(url, headers=self.headers)
                 res.raise_for_status()
+
+                url = f"https://ident.familysearch.org/cis-web/oauth2/v3/authorization?response_type=code&scope=openid profile email qualifies_for_affiliate_account country&client_id=a02j000000KTRjpAAH&redirect_uri=https://misbach.github.io/fs-auth/index_raw.html&username={self.username}"
+                self.write_log("Downloading: " + url)
+                response = self.get(url, allow_redirects=False, headers=self.headers)
+                location = response.headers["location"]
+                code = parse_qs(urlparse(location).query).get("code")
+                url = "https://ident.familysearch.org/cis-web/oauth2/v3/token"
+                self.write_log("Downloading: " + url)
+                res = self.post(
+                    url,
+                    data={
+                        "grant_type": "authorization_code",
+                        "client_id": "a02j000000KTRjpAAH",
+                        "code": code,
+                        "redirect_uri": "https://misbach.github.io/fs-auth/index_raw.html",
+                    },
+                    headers=self.headers,
+                )
+
+                try:
+                    data = res.json()
+                except ValueError:
+                    self.write_log("Invalid auth request")
+                    continue
+
+                if "access_token" not in data:
+                    self.write_log(res.text)
+                    continue
+                access_token = data["access_token"]
+                self.headers.update({"Authorization": f"Bearer {access_token}"})
+
             except requests.exceptions.ReadTimeout:
                 self.write_log("Read timed out")
                 continue
@@ -111,7 +150,7 @@ class Session(requests.Session):
             try:
                 self.write_log("Downloading: " + url)
                 r = self.get(
-                    "https://familysearch.org" + url,
+                    "https://api.familysearch.org" + url,
                     timeout=self.timeout,
                     headers=headers,
                 )
@@ -175,3 +214,15 @@ class Session(requests.Session):
         if string in translations and self.lang in translations[string]:
             return translations[string][self.lang]
         return string
+
+
+class CachedSession(GMASession, CSession):
+
+    def __init__(self, username, password, verbose=False, logfile=False, timeout=60):
+        CSession.__init__(self, 'http_cache', backend='filesystem', expire_after=86400)
+        GMASession.__init__(self, username, password, verbose=verbose, logfile=logfile, timeout=timeout)
+class Session(GMASession, requests.Session):
+
+    def __init__(self, username, password, verbose=False, logfile=False, timeout=60):
+        requests.Session.__init__(self)
+        GMASession.__init__(self, username, password, verbose=verbose, logfile=logfile, timeout=timeout)

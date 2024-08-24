@@ -2,10 +2,17 @@ import sys
 import re
 import time
 import asyncio
-from urllib.parse import unquote
-
+import os
+from urllib.parse import unquote, unquote_plus
+from datetime import datetime
+from typing import Set, Dict, List, Tuple, Union, Optional, BinaryIO, Any
 # global imports
 import babelfish
+import geocoder
+import requests
+import xml.etree.cElementTree as ET
+from xml.etree.cElementTree import Element
+from requests_cache import CachedSession
 
 # local imports
 import getmyancestors
@@ -16,6 +23,52 @@ from getmyancestors.classes.constants import (
     ORDINANCES_STATUS,
 )
 
+
+COUNTY = 'County'
+COUNTRY = 'Country'
+CITY = 'City'
+
+GEONAME_FEATURE_MAP = {
+    'ADM1': COUNTY, #	first-order administrative division	a primary administrative division of a country, such as a state in the United States
+    'ADM1H': COUNTY, #  historical first-order administrative division	a former first-order administrative division
+    'ADM2': COUNTY, #	second-order administrative division	a subdivision of a first-order administrative division
+    'ADM2H': COUNTY, #	historical second-order administrative division	a former second-order administrative division
+    'ADM3': COUNTY, #	third-order administrative division	a subdivision of a second-order administrative division
+    'ADM3H': COUNTY, #	historical third-order administrative division	a former third-order administrative division
+    'ADM4': COUNTY, #	fourth-order administrative division	a subdivision of a third-order administrative division
+    'ADM4H': COUNTY, #	historical fourth-order administrative division	a former fourth-order administrative division
+    'ADM5': COUNTY, #	fifth-order administrative division	a subdivision of a fourth-order administrative division
+    'ADM5H': COUNTY, #	historical fifth-order administrative division	a former fifth-order administrative division
+    'ADMD': COUNTY, #	administrative division	an administrative division of a country, undifferentiated as to administrative level
+    'ADMDH': COUNTY, #	historical administrative division 	a former administrative division of a political entity, undifferentiated as to administrative level
+    # 'LTER': 	leased area	a tract of land leased to another country, usually for military installations
+    'PCL': COUNTRY, # political entity	
+    'PCLD': COUNTRY, # dependent political entity	
+    'PCLF': COUNTRY, # freely associated state	
+    'PCLH': COUNTRY, # historical political entity	a former political entity
+    'PCLI': COUNTRY, # independent political entity	
+    'PCLIX': COUNTRY, # section of independent political entity	
+    'PCLS': COUNTRY, # semi-independent political entity
+
+    'PPL': CITY, # populated place	a city, town, village, or other agglomeration of buildings where people live and work
+    'PPLA': CITY, # seat of a first-order administrative division	seat of a first-order administrative division (PPLC takes precedence over PPLA)
+    'PPLA2': CITY, # seat of a second-order administrative division	
+    'PPLA3': CITY, # seat of a third-order administrative division	
+    'PPLA4': CITY, # seat of a fourth-order administrative division	
+    'PPLA5': CITY, # seat of a fifth-order administrative division	
+    'PPLC': CITY, # capital of a political entity	
+    'PPLCH': CITY, # historical capital of a political entity	a former capital of a political entity
+    'PPLF': CITY, # farm village	a populated place where the population is largely engaged in agricultural activities
+    'PPLG': CITY, # seat of government of a political entity	
+    'PPLH': CITY, # historical populated place	a populated place that no longer exists
+    'PPLL': CITY, # populated locality	an area similar to a locality but with a small group of dwellings or other buildings
+    'PPLQ': CITY, # abandoned populated place	
+    'PPLR': CITY, # religious populated place	a populated place whose population is largely engaged in religious occupations
+    'PPLS': CITY, # populated places	cities, towns, villages, or other agglomerations of buildings where people live and work
+    'PPLW': CITY, # destroyed populated place	a village, town or city destroyed by a natural disaster, or by war
+    'PPLX': CITY, # section of populated place
+
+}
 
 # getmyancestors classes and functions
 def cont(string):
@@ -42,7 +95,6 @@ def cont(string):
         max_len = 248
     return ("\n%s CONT " % level).join(res) + "\n"
 
-
 class Note:
     """GEDCOM Note class
     :param text: the Note content
@@ -50,27 +102,55 @@ class Note:
     :param num: the GEDCOM identifier
     """
 
-    counter = 0
+    counter = {}
 
-    def __init__(self, text="", tree=None, num=None):
+    def __init__(self, text="", tree=None, num=None, num_prefix=None, note_type=None):
+        self._handle = None
+        self.note_type = note_type or 'Source Note'
+        self.num_prefix = num_prefix
         if num:
             self.num = num
         else:
-            Note.counter += 1
-            self.num = Note.counter
+            Note.counter[num_prefix or 'None'] = Note.counter.get(num_prefix or 'None', 0) + 1
+            self.num = Note.counter[num_prefix or 'None']
+        print(f'##### Creating Note: {num_prefix}, {self.num}', file=sys.stderr)
         self.text = text.strip()
 
         if tree:
             tree.notes.append(self)
 
+    @property
+    def id(self):
+        return f'{self.num_prefix}_{self.num}' if self.num_prefix != None else self.num
+
     def print(self, file=sys.stdout):
         """print Note in GEDCOM format"""
-        file.write(cont("0 @N%s@ NOTE %s" % (self.num, self.text)))
+        print(f'Note: {self.text}', file=sys.stderr)
+        file.write(cont("0 @N%s@ NOTE %s" % (self.id, self.text)))
 
     def link(self, file=sys.stdout, level=1):
         """print the reference in GEDCOM format"""
-        file.write("%s NOTE @N%s@\n" % (level, self.num))
+        print(f'Linking Note: {self.id}', file=sys.stderr)
+        file.write("%s NOTE @N%s@\n" % (level, self.id))
 
+    
+    @property
+    def handle(self):
+        if not self._handle:
+            self._handle = '_' + os.urandom(10).hex()
+
+        return self._handle
+
+    def printxml(self, parent_element: Element) -> None:
+        note_element = ET.SubElement(
+            parent_element,
+            'note', 
+            handle=self.handle,
+            # change='1720382308', 
+            id=self.id, 
+            type='Source Note'
+        )
+        ET.SubElement(note_element, 'text').text = self.text
 
 class Source:
     """GEDCOM Source class
@@ -88,6 +168,8 @@ class Source:
             Source.counter += 1
             self.num = Source.counter
 
+        self._handle = None
+
         self.tree = tree
         self.url = self.citation = self.title = self.fid = None
         self.notes = set()
@@ -103,13 +185,31 @@ class Source:
             if "titles" in data:
                 self.title = data["titles"][0]["value"]
             if "notes" in data:
-                for n in data["notes"]:
-                    if n["text"]:
-                        self.notes.add(Note(n["text"], self.tree))
+                notes = [ n['text'] for n in data["notes"] if n["text"] ]
+                for idx, n in enumerate(notes):
+                    self.notes.add(Note(
+                        n,
+                        self.tree,
+                        num="S%s-%s" % (self.id, idx),
+                        note_type='Source Note'
+                    ))
+            self.modified = data['attribution']['modified']
+
+    @property
+    def id(self):
+        return 'S' + str(self.fid or self.num)
+    
+
+    @property
+    def handle(self):
+        if not self._handle:
+            self._handle = '_' + os.urandom(10).hex()
+
+        return self._handle
 
     def print(self, file=sys.stdout):
         """print Source in GEDCOM format"""
-        file.write("0 @S%s@ SOUR \n" % self.num)
+        file.write("0 @S%s@ SOUR \n" % self.id)
         if self.title:
             file.write(cont("1 TITL " + self.title))
         if self.citation:
@@ -122,7 +222,31 @@ class Source:
 
     def link(self, file=sys.stdout, level=1):
         """print the reference in GEDCOM format"""
-        file.write("%s SOUR @S%s@\n" % (level, self.num))
+        file.write("%s SOUR @S%s@\n" % (level, self.id))
+
+    def printxml(self, parent_element: Element) -> None:
+        
+    #         <source handle="_fa593c277b471380bbcc5282e8f" change="1720382301" id="SQ8M5-NSP">
+    #   <stitle>Palkovics Cser József, &quot;Hungary Civil Registration, 1895-1980&quot;</stitle>
+    #   <sauthor>&quot;Hungary Civil Registration, 1895-1980&quot;, , &lt;i&gt;FamilySearch&lt;/i&gt; (https://www.familysearch.org/ark:/61903/1:1:6JBQ-NKWD : Thu Mar 07 10:23:43 UTC 2024), Entry for Palkovics Cser József and Palkovics Cser István, 27 Aug 1928.</sauthor>
+    #   <spubinfo>https://familysearch.org/ark:/61903/1:1:6JBQ-NKWD</spubinfo>
+    #   <srcattribute type="REFN" value="Q8M5-NSP"/>
+    # </source>
+        source_element = ET.SubElement(
+            parent_element,
+            'source',
+            handle=self.handle,
+            change=str(int(self.modified / 1000)),
+            id=self.id
+        )
+        if self.title:
+            ET.SubElement(source_element, 'stitle').text = self.title
+        if self.citation:
+            ET.SubElement(source_element, 'sauthor').text = self.citation
+        if self.url:
+            ET.SubElement(source_element, 'spubinfo').text = self.url
+        if self.fid:
+            ET.SubElement(source_element, 'srcattribute', type='REFN', value=self.fid)
 
 
 class Fact:
@@ -131,32 +255,103 @@ class Fact:
     :param tree: a tree object
     """
 
-    def __init__(self, data=None, tree=None):
-        self.value = self.type = self.date = self.place = self.note = self.map = None
+    counter = {}
+
+    def __init__(self, data=None, tree: Optional['Tree']=None, num_prefix=None):
+        self.value = self.type = self.date = None
+        self.date_type = None
+        self.place: Optional[Place] = None
+        self.note = None
+        self._handle: Optional[str] = None
         if data:
             if "value" in data:
                 self.value = data["value"]
             if "type" in data:
                 self.type = data["type"]
+                self.fs_type = self.type
                 if self.type in FACT_EVEN:
                     self.type = tree.fs._(FACT_EVEN[self.type])
                 elif self.type[:6] == "data:,":
                     self.type = unquote(self.type[6:])
                 elif self.type not in FACT_TAGS:
                     self.type = None
+
+
+        self.num_prefix = f'{num_prefix}_{FACT_TAGS[self.type]}' if num_prefix and self.type in FACT_TAGS else num_prefix
+        Fact.counter[self.num_prefix or 'None'] = Fact.counter.get(self.num_prefix or 'None', 0) + 1
+        self.num = Fact.counter[self.num_prefix or 'None']
+        if data:
             if "date" in data:
-                self.date = data["date"]["original"]
+                if 'formal' in data['date']:
+                    self.date = data['date']['formal'].split('+')[-1].split('/')[0]
+                    if data['date']['formal'].startswith('A+'):
+                        self.date_type = 'about'
+                    if data['date']['formal'].startswith('/+'):
+                        self.date_type = 'before'
+                    if data['date']['formal'].endswith('/'):
+                        self.date_type = 'after'
+                else:
+                    self.date = data["date"]["original"]
             if "place" in data:
                 place = data["place"]
-                self.place = place["original"]
-                if "description" in place and place["description"][1:] in tree.places:
-                    self.map = tree.places[place["description"][1:]]
+                place_name = place["original"]
+                place_id = place["description"][1:] if "description" in place and place["description"][1:] in tree.places else None
+                self.place = tree.ensure_place(place_name, place_id)
             if "changeMessage" in data["attribution"]:
-                self.note = Note(data["attribution"]["changeMessage"], tree)
+                self.note = Note(
+                    data["attribution"]["changeMessage"], 
+                    tree,
+                    num_prefix='E' + self.num_prefix if self.num_prefix else None,
+                    note_type='Event Note',
+                )
             if self.type == "http://gedcomx.org/Death" and not (
                 self.date or self.place
             ):
                 self.value = "Y"
+
+        if tree:
+            tree.facts.add(self)
+        
+
+    @property
+    def id(self):
+        return f'{self.num_prefix}_{self.num}' if self.num_prefix != None else self.num
+
+
+    @property
+    def handle(self):
+        if not self._handle:
+            self._handle = '_' + os.urandom(10).hex()
+
+        return self._handle
+
+    def printxml(self, parent_element):
+            
+        event_element = ET.SubElement(
+            parent_element,
+            'event',
+            handle=self.handle,
+            # change='1720382301',
+            id=self.id
+        )
+
+        ET.SubElement(event_element, 'type').text = (
+            unquote_plus(self.type[len('http://gedcomx.org/'):])
+            if self.type.startswith('http://gedcomx.org/')
+            else self.type
+        )
+        # FACT_TAGS.get(self.type, self.type)
+        if self.date:
+            params={
+                'val': self.date,
+            }
+            if self.date_type is not None:
+                params['type'] = self.date_type
+            ET.SubElement(event_element, 'datestr', **params)
+        if self.place:
+            ET.SubElement(event_element, 'place', hlink=self.place.handle)
+        if self.note:
+            ET.SubElement(event_element, 'noteref', hlink=self.note.handle)
 
     def print(self, file=sys.stdout):
         """print Fact in GEDCOM format
@@ -176,7 +371,7 @@ class Fact:
         if self.date:
             file.write(cont("2 DATE " + self.date))
         if self.place:
-            file.write(cont("2 PLAC " + self.place))
+            self.place.print(file, 2)
         if self.map:
             latitude, longitude = self.map
             file.write("3 MAP\n4 LATI %s\n4 LONG %s\n" % (latitude, longitude))
@@ -209,18 +404,29 @@ class Memorie:
             file.write(cont("2 FILE " + self.url))
 
 
+NAME_MAP = {
+    "preferred" : 'Preeferred Name',
+    "nickname" : 'Nickname',
+    "birthname": 'Birth Name',
+    "aka": 'Also Known As',
+    "married": 'Married Name',
+}
+
 class Name:
     """GEDCOM Name class
     :param data: FS Name data
     :param tree: a Tree object
     """
 
-    def __init__(self, data=None, tree=None):
+    def __init__(self, data=None, tree=None, owner_fis=None, kind=None, alternative: bool=False):
         self.given = ""
         self.surname = ""
         self.prefix = None
         self.suffix = None
         self.note = None
+        self.alternative = alternative
+        self.owner_fis = owner_fis
+        self.kind = kind
         if data:
             if "parts" in data["nameForms"][0]:
                 for z in data["nameForms"][0]["parts"]:
@@ -233,7 +439,24 @@ class Name:
                     if z["type"] == "http://gedcomx.org/Suffix":
                         self.suffix = z["value"]
             if "changeMessage" in data["attribution"]:
-                self.note = Note(data["attribution"]["changeMessage"], tree)
+                self.note = Note(
+                    data["attribution"]["changeMessage"],
+                    tree,
+                    num_prefix=f'NAME_{owner_fis}_{kind}',
+                    note_type='Name Note',
+                )
+
+    def printxml(self, parent_element):
+        params = {}
+        if self.kind is not None:
+            params['type'] = NAME_MAP.get(self.kind, self.kind)
+        if self.alternative:
+            params['alt'] = '1'
+        person_name = ET.SubElement(parent_element, 'name', **params)
+        ET.SubElement(person_name, 'first').text = self.given
+        ET.SubElement(person_name, 'surname').text = self.surname
+        # TODO prefix / suffix
+
 
     def print(self, file=sys.stdout, typ=None):
         """print Name in GEDCOM format
@@ -250,6 +473,69 @@ class Name:
         if self.note:
             self.note.link(file, 2)
 
+
+
+class Place:
+    """GEDCOM Place class
+    :param name: the place name
+    :param tree: a Tree object
+    :param num: the GEDCOM identifier
+    """
+
+    counter = 0
+
+    def __init__(
+            self, 
+            id: str, 
+            name: str, 
+            type: Optional[str]=None, 
+            parent: Optional['Place']=None,
+            latitude: Optional[float]=None,
+            longitude: Optional[float]=None):
+        self._handle = None
+        self.name = name
+        self.type = type
+        self.id = id
+        self.parent = parent
+        self.latitude = latitude
+        self.longitude = longitude
+
+    @property
+    def handle(self):
+        if not self._handle:
+            self._handle = '_' + os.urandom(10).hex()
+
+        return self._handle
+
+
+    def print(self, file=sys.stdout, indentation=0):
+        """print Place in GEDCOM format"""
+        file.write("%d @P%s@ PLAC %s\n" % (indentation, self.num, self.name))
+
+    def printxml(self, parent_element):
+
+
+    #     <placeobj handle="_fac310617a8744e1d62f3d0dafe" change="1723223127" id="P0000" type="Country">
+    #   <pname value="Magyarország"/>
+    # </placeobj>
+    # <placeobj handle="_fac310962e15149e8244c2ccade" change="1723223149" id="P0001" type="County">
+    #   <pname value="Fejér"/>
+    #   <placeref hlink="_fac310617a8744e1d62f3d0dafe"/>
+    # </placeobj>
+        place_element = ET.SubElement(
+            parent_element, 
+            'placeobj',
+            handle=self.handle,
+            # change='1720382307',
+            id=self.id,
+            type=self.type or 'Unknown'
+        )
+        # ET.SubElement(place_element, 'ptitle').text = self.name
+        ET.SubElement(place_element, 'pname', value=self.name)
+        if self.parent:
+            ET.SubElement(place_element, 'placeref', hlink=self.parent.handle)
+        if self.latitude and self.longitude:
+            ET.SubElement(place_element, 'coord', long=str(self.longitude), lat=str(self.latitude))
 
 class Ordinance:
     """GEDCOM Ordinance class
@@ -276,6 +562,46 @@ class Ordinance:
         if self.famc:
             file.write("2 FAMC @F%s@\n" % self.famc.num)
 
+class Citation:
+
+    def __init__(self, data: Dict[str, Any], source: Source):
+        self._handle = None
+        self.id = data["id"]
+        self.source = source
+        self.message = (
+            data["attribution"]["changeMessage"]
+            if "changeMessage" in data["attribution"]
+            else None
+        )
+        # TODO create citation note out of this.
+        self.modified = data['attribution']['modified']
+
+    
+    @property
+    def handle(self):
+        if not self._handle:
+            self._handle = '_' + os.urandom(10).hex()
+
+        return self._handle
+
+    def printxml(self, parent_element: Element):
+        
+#     <citation handle="_fac4a72a01b1681293ea1ee8d9" change="1723265781" id="C0000">
+#       <dateval val="1998-05-03"/>
+#       <confidence>2</confidence>
+#       <noteref hlink="_fac4a71ac2c6c5749abd6a0bd72"/>
+#       <sourceref hlink="_fac4a70566329a02afcc10731f5"/>
+#     </citation>
+        citation_element = ET.SubElement(
+            parent_element,
+            'citation',
+            handle=self.handle,
+            change=str(int(self.modified / 1000)),
+            id='C' + str(self.id)
+        )
+        ET.SubElement(citation_element, 'confidence').text = '2'
+        ET.SubElement(citation_element, 'sourceref', hlink=self.source.handle)
+
 
 class Indi:
     """GEDCOM individual class
@@ -286,7 +612,8 @@ class Indi:
 
     counter = 0
 
-    def __init__(self, fid=None, tree=None, num=None):
+    def __init__(self, fid: str, tree: 'Tree', num=None):
+        self._handle = None
         if num:
             self.num = num
         else:
@@ -294,25 +621,30 @@ class Indi:
             self.num = Indi.counter
         self.fid = fid
         self.tree = tree
-        self.famc_fid = set()
-        self.fams_fid = set()
-        self.famc_num = set()
-        self.fams_num = set()
-        self.name = None
+        self.famc: Set['Fam'] = set()
+        self.fams: Set['Fam'] = set()
+        # self.famc_fid = set()
+        # self.fams_fid = set()
+        # self.famc_num = set()
+        # self.fams_num = set()
+        # self.famc_ids = set()
+        # self.fams_ids = set()
+        self.name: Optional[Name] = None
         self.gender = None
         self.living = None
-        self.parents = set()
-        self.spouses = set()
-        self.children = set()
+        self.parents: Set[Tuple[str, str]] = set() # (father_id, mother_id)
+        self.spouses: Set[Tuple[str, str, str]]  = set() # (person1, person2, relfid)
+        self.children: Set[Tuple[str, str, str]] = set() # (father_id, mother_id, child_id)
         self.baptism = self.confirmation = self.initiatory = None
         self.endowment = self.sealing_child = None
-        self.nicknames = set()
-        self.facts = set()
-        self.birthnames = set()
-        self.married = set()
-        self.aka = set()
-        self.notes = set()
-        self.sources = set()
+        self.nicknames: Set[Name] = set()
+        self.birthnames: Set[Name] = set()
+        self.married: Set[Name] = set()
+        self.aka: Set[Name] = set()
+        self.facts: Set[Fact] = set()
+        self.notes: Set[Note] = set()
+        # self.sources: Set[Source] = set()
+        self.citations: Set[Citation] = set()
         self.memories = set()
 
     def add_data(self, data):
@@ -320,17 +652,18 @@ class Indi:
         if data:
             self.living = data["living"]
             for x in data["names"]:
-                if x["preferred"]:
-                    self.name = Name(x, self.tree)
+                alt = not x.get('preferred', False)
+                if x["type"] == "http://gedcomx.org/Nickname":
+                    self.nicknames.add(Name(x, self.tree, self.fid, "nickname", alt))
+                elif x["type"] == "http://gedcomx.org/BirthName":
+                    self.birthnames.add(Name(x, self.tree, self.fid, "birthname", alt))
+                elif x["type"] == "http://gedcomx.org/AlsoKnownAs":
+                    self.aka.add(Name(x, self.tree, self.fid, "aka", alt))
+                elif x["type"] == "http://gedcomx.org/MarriedName":
+                    self.married.add(Name(x, self.tree, self.fid, "married", alt))
                 else:
-                    if x["type"] == "http://gedcomx.org/Nickname":
-                        self.nicknames.add(Name(x, self.tree))
-                    if x["type"] == "http://gedcomx.org/BirthName":
-                        self.birthnames.add(Name(x, self.tree))
-                    if x["type"] == "http://gedcomx.org/AlsoKnownAs":
-                        self.aka.add(Name(x, self.tree))
-                    if x["type"] == "http://gedcomx.org/MarriedName":
-                        self.married.add(Name(x, self.tree))
+                    print('Unknown name type: ' + x.get('type'), file=sys.stderr)
+                    raise 'Unknown name type'
             if "gender" in data:
                 if data["gender"]["type"] == "http://gedcomx.org/Male":
                     self.gender = "M"
@@ -346,10 +679,12 @@ class Indi:
                                 "=== %s ===\n%s"
                                 % (self.tree.fs._("Life Sketch"), x.get("value", "")),
                                 self.tree,
+                                num_prefix=f'INDI_{self.fid}',
+                                note_type='Person Note',
                             )
                         )
                     else:
-                        self.facts.add(Fact(x, self.tree))
+                        self.facts.add(Fact(x, self.tree, num_prefix=f'INDI_{self.fid}'))
             if "sources" in data:
                 sources = self.tree.fs.get_url(
                     "/platform/tree/persons/%s/sources" % self.fid
@@ -357,17 +692,16 @@ class Indi:
                 if sources:
                     quotes = dict()
                     for quote in sources["persons"][0]["sources"]:
-                        quotes[quote["descriptionId"]] = (
-                            quote["attribution"]["changeMessage"]
-                            if "changeMessage" in quote["attribution"]
-                            else None
+                        source_id = quote["descriptionId"]
+                        source_data = next(
+                            (s for s in sources['sourceDescriptions'] if s['id'] == source_id),
+                            None,
                         )
-                    for source in sources["sourceDescriptions"]:
-                        if source["id"] not in self.tree.sources:
-                            self.tree.sources[source["id"]] = Source(source, self.tree)
-                        self.sources.add(
-                            (self.tree.sources[source["id"]], quotes[source["id"]])
-                        )
+                        source = self.tree.ensure_source(source_data)
+                        if source:
+                            citation = self.tree.ensure_citation(quote, source)
+                            self.citations.add(citation)
+
             for evidence in data.get("evidence", []):
                 memory_id, *_ = evidence["id"].partition("-")
                 url = "/platform/memories/memories/%s" % memory_id
@@ -380,26 +714,39 @@ class Indi:
                                 for val in x.get("titles", [])
                                 + x.get("descriptions", [])
                             )
-                            self.notes.add(Note(text, self.tree))
+                            self.notes.add(
+                                Note(
+                                    text,
+                                    self.tree,
+                                    num_prefix=f'INDI_{self.fid}',
+                                    note_type='Person Note',
+                                ))
                         else:
                             self.memories.add(Memorie(x))
 
-    def add_fams(self, fams):
+    def add_fams(self, fam: 'Fam'):
         """add family fid (for spouse or parent)"""
-        self.fams_fid.add(fams)
+        self.fams.add(fam)
 
-    def add_famc(self, famc):
+    def add_famc(self, fam: 'Fam'):
         """add family fid (for child)"""
-        self.famc_fid.add(famc)
+        self.famc.add(fam)
 
     def get_notes(self):
         """retrieve individual notes"""
+        print(f'Getting Notes for {self.fid}', file=sys.stderr)
         notes = self.tree.fs.get_url("/platform/tree/persons/%s/notes" % self.fid)
         if notes:
             for n in notes["persons"][0]["notes"]:
                 text_note = "=== %s ===\n" % n["subject"] if "subject" in n else ""
                 text_note += n["text"] + "\n" if "text" in n else ""
-                self.notes.add(Note(text_note, self.tree))
+                self.notes.add(
+                    Note(
+                        text_note,
+                        self.tree,
+                        num_prefix=f'INDI_{self.fid}',
+                        note_type='Person Note',
+                    ))
 
     def get_ordinances(self):
         """retrieve LDS ordinances
@@ -451,11 +798,79 @@ class Indi:
                 if n.text == text:
                     self.notes.add(n)
                     return
-            self.notes.add(Note(text, self.tree))
+            self.notes.add(Note(text, self.tree, num_prefix=f'INDI_{self.fid}_CONTRIB', note_type='Contribution Note'))
+
+    @property
+    def id(self):
+        return self.fid or self.num
+    
+
+    @property
+    def handle(self):
+        if not self._handle:
+            self._handle = '_' + os.urandom(10).hex()
+
+        return self._handle
+
+    def printxml(self, parent_element):
+
+        # <person handle="_fa593c2779e5ed1c947416cba9e" change="1720382301" id="IL43B-D2H">
+        #     <gender>M</gender>
+        #     <name type="Birth Name">
+        #         <first>József</first>
+        #         <surname>Cser</surname>
+        #         <noteref hlink="_fa593c2779f7c527e3afe4623b9"/>
+        #     </name>
+        #     <eventref hlink="_fa593c277a0712aa4241bbf47db" role="Primary"/>
+        #     <attribute type="_FSFTID" value="L43B-D2H"/>
+        #     <childof hlink="_fa593c277af212e6c1f9f44bc4a"/>
+        #     <parentin hlink="_fa593c277af72c83e0e3fbf6ed2"/>
+        #     <citationref hlink="_fa593c277b7715371c26d1b0a81"/>
+        # </person>
+        person = ET.SubElement(parent_element, 
+                'person', 
+                handle=self.handle, 
+                # change='1720382301', 
+                id='I' + str(self.id))
+        if self.fid:
+            ET.SubElement(person, 'attribute', type='_FSFTID', value=self.fid)
+
+        if self.name:
+            self.name.printxml(person)
+        for name in self.nicknames | self.birthnames | self.aka | self.married:
+            name.printxml(person)
+        
+        gender = ET.SubElement(person, 'gender')
+        gender.text = self.gender
+        
+        if self.fams:
+            for fam in self.fams:
+                ET.SubElement(person, 'parentin', hlink=fam.handle)
+
+        if self.famc:
+            for fam in self.famc:
+                ET.SubElement(person, 'childof', hlink=fam.handle)
+
+
+        ET.SubElement(person, 'attribute', type="_FSFTID", value=self.fid)
+
+        
+        for fact in self.facts:
+            ET.SubElement(person, 'eventref', hlink=fact.handle, role='Primary')
+
+        for citation in self.citations:
+            ET.SubElement(person, 'citationref', hlink=citation.handle)
+
+        for note in self.notes:
+            ET.SubElement(person, 'noteref', hlink=note.handle)
+
+    #   <noteref hlink="_fac4a686369713d9cd55159ada9"/>
+    #   <citationref hlink="_fac4a72a01b1681293ea1ee8d9"/>
+
 
     def print(self, file=sys.stdout):
         """print individual in GEDCOM format"""
-        file.write("0 @I%s@ INDI\n" % self.num)
+        file.write("0 @I%s@ INDI\n" % self.id)
         if self.name:
             self.name.print(file)
         for o in self.nicknames:
@@ -487,10 +902,15 @@ class Indi:
         if self.sealing_child:
             file.write("1 SLGC\n")
             self.sealing_child.print(file)
-        for num in self.fams_num:
-            file.write("1 FAMS @F%s@\n" % num)
-        for num in self.famc_num:
-            file.write("1 FAMC @F%s@\n" % num)
+        for fam in self.fams:
+            file.write("1 FAMS @F%s@\n" % fam.id)
+        for fam in self.famc:
+            file.write("1 FAMC @F%s@\n" % fam.id)
+        # print(f'Fams Ids: {self.fams_ids}, {self.fams_fid}, {self.fams_num}', file=sys.stderr)
+        # for num in self.fams_ids:
+        # print(f'Famc Ids: {self.famc_ids}', file=sys.stderr)
+        # for num in self.famc_ids:
+            # file.write("1 FAMC @F%s@\n" % num)
         file.write("1 _FSFTID %s\n" % self.fid)
         for o in self.notes:
             o.link(file)
@@ -510,29 +930,44 @@ class Fam:
 
     counter = 0
 
-    def __init__(self, husb=None, wife=None, tree=None, num=None):
-        if num:
-            self.num = num
-        else:
-            Fam.counter += 1
-            self.num = Fam.counter
-        self.husb_fid = husb if husb else None
-        self.wife_fid = wife if wife else None
+    def __init__(self, husband: Indi | None, wife: Indi | None, tree: 'Tree'):
+        self._handle = None
+        self.num = Fam.gen_id(husband, wife)
+        self.fid = None
+        self.husband = husband
+        self.wife = wife
         self.tree = tree
-        self.husb_num = self.wife_num = self.fid = None
-        self.facts = set()
+        self.children: Set[Indi] = set()
+        self.facts: Set[Fact] = set()
         self.sealing_spouse = None
-        self.chil_fid = set()
-        self.chil_num = set()
         self.notes = set()
         self.sources = set()
 
-    def add_child(self, child):
-        """add a child fid to the family"""
-        if child not in self.chil_fid:
-            self.chil_fid.add(child)
+    @property
+    def handle(self):
+        if not self._handle:
+            self._handle = '_' + os.urandom(10).hex()
 
-    def add_marriage(self, fid):
+        return self._handle
+    
+    @staticmethod
+    def gen_id(husband: Indi | None, wife: Indi | None) -> str:
+        if husband and wife:
+            return f'FAM_{husband.id}-{wife.id}'
+        elif husband:
+            return f'FAM_{husband.id}-UNK'
+        elif wife:
+            return f'FAM_UNK-{wife.id}'
+        else:
+            Fam.counter += 1
+            return f'FAM_UNK-UNK-{Fam.counter}'
+
+    def add_child(self, child: Indi | None):
+        """add a child fid to the family"""
+        if child is not None:
+            self.children.add(child)
+
+    def add_marriage(self, fid: str):
         """retrieve and add marriage information
         :param fid: the marriage fid
         """
@@ -543,7 +978,7 @@ class Fam:
             if data:
                 if "facts" in data["relationships"][0]:
                     for x in data["relationships"][0]["facts"]:
-                        self.facts.add(Fact(x, self.tree))
+                        self.facts.add(Fact(x, self.tree, num_prefix=f'FAM_{self.fid}'))
                 if "sources" in data["relationships"][0]:
                     quotes = dict()
                     for x in data["relationships"][0]["sources"]:
@@ -580,7 +1015,7 @@ class Fam:
                 for n in notes["relationships"][0]["notes"]:
                     text_note = "=== %s ===\n" % n["subject"] if "subject" in n else ""
                     text_note += n["text"] + "\n" if "text" in n else ""
-                    self.notes.add(Note(text_note, self.tree))
+                    self.notes.add(Note(text_note, self.tree, num_prefix=f'FAM_{self.fid}', note_type='Marriage Note'))
 
     def get_contributors(self):
         """retrieve contributors"""
@@ -603,17 +1038,44 @@ class Fam:
                     if n.text == text:
                         self.notes.add(n)
                         return
-                self.notes.add(Note(text, self.tree))
+                self.notes.add(Note(text, self.tree, num_prefix=f'FAM_{self.fid}_CONTRIB', note_type='Contribution Note'))
+
+    @property
+    def id(self):
+        return self.num
+    
+    def printxml(self, parent_element):
+        # <family handle="_fa593c277af212e6c1f9f44bc4a" change="1720382301" id="F9MKP-K92">
+        #   <rel type="Unknown"/>
+        #   <father hlink="_fa593c277f14dc6db9ab19cbe09"/>
+        #   <mother hlink="_fa593c277cd4af15983d7064c59"/>
+        #   <childref hlink="_fa593c279e1466787c923487b98"/>
+        #   <attribute type="_FSFTID" value="9MKP-K92"/>
+        # </family>
+        family = ET.SubElement(parent_element, 
+                'family', 
+                handle=self.handle, 
+                # change='1720382301', 
+                id=self.id)
+        ET.SubElement(family, 'rel', type='Unknown')
+        if self.husband:
+            ET.SubElement(family, 'father', hlink=self.husband.handle)
+        if self.wife:
+            ET.SubElement(family, 'mother', hlink=self.wife.handle)
+        for child in self.children:
+            ET.SubElement(family, 'childref', hlink=child.handle)
+        for fact in self.facts:
+            ET.SubElement(family, 'eventref', hlink=fact.handle, role='Primary')
 
     def print(self, file=sys.stdout):
         """print family information in GEDCOM format"""
-        file.write("0 @F%s@ FAM\n" % self.num)
-        if self.husb_num:
-            file.write("1 HUSB @I%s@\n" % self.husb_num)
-        if self.wife_num:
-            file.write("1 WIFE @I%s@\n" % self.wife_num)
-        for num in self.chil_num:
-            file.write("1 CHIL @I%s@\n" % num)
+        file.write("0 @F%s@ FAM\n" % self.id)
+        if self.husband:
+            file.write("1 HUSB @I%s@\n" % self.husband.id)
+        if self.wife:
+            file.write("1 WIFE @I%s@\n" % self.wife.id)
+        for child in self.children:
+            file.write("1 CHIL @I%s@\n" % child.id)
         for o in self.facts:
             o.print(file)
         if self.sealing_spouse:
@@ -634,22 +1096,39 @@ class Tree:
     :param fs: a Session object
     """
 
-    def __init__(self, fs=None):
+    def __init__(self, fs: Optional[requests.Session]=None, exclude: List[str]=None, geonames_key=None):
         self.fs = fs
-        self.indi = dict()
-        self.fam = dict()
+        self.geonames_key = geonames_key
+        self.indi: Dict[str, Indi] = dict()
+        self.fam: Dict[str, Fam] = dict()
         self.notes = list()
-        self.sources = dict()
-        self.places = dict()
+        self.facts: Set[Fact] = set()
+        self.sources: Dict[str, Source] = dict()
+        self.citations: Dict[str, Citation] = dict()
+        self.places: List[Place] = []
+        self.places_by_names: Dict[str, Place] = dict()
+        self.place_cache: Dict[str, Tuple[float, float]] = dict()
         self.display_name = self.lang = None
+        self.exclude: List[str] = exclude or []
+        self.place_counter = 0
         if fs:
             self.display_name = fs.display_name
             self.lang = babelfish.Language.fromalpha2(fs.lang).name
 
-    def add_indis(self, fids):
+        self.geosession = CachedSession('http_cache', backend='filesystem', expire_after=86400)
+
+    def add_indis(self, fids_in: List[str]):
         """add individuals to the family tree
         :param fids: an iterable of fid
         """
+        fids = []
+        for fid in fids_in:
+            if fid not in self.exclude:
+                fids.append(fid)
+            else:
+                print(
+                    "Excluding %s from the family tree" % fid, file=sys.stderr
+                )
 
         async def add_datas(loop, data):
             futures = set()
@@ -671,21 +1150,17 @@ class Tree:
             if data:
                 if "places" in data:
                     for place in data["places"]:
-                        if place["id"] not in self.places:
-                            self.places[place["id"]] = (
-                                str(place["latitude"]),
-                                str(place["longitude"]),
+                        if place["id"] not in self.place_cache:
+                            self.place_cache[place["id"]] = (
+                                place["latitude"],
+                                place["longitude"],
                             )
                 loop.run_until_complete(add_datas(loop, data))
                 if "childAndParentsRelationships" in data:
                     for rel in data["childAndParentsRelationships"]:
-                        father = (
-                            rel["parent1"]["resourceId"] if "parent1" in rel else None
-                        )
-                        mother = (
-                            rel["parent2"]["resourceId"] if "parent2" in rel else None
-                        )
-                        child = rel["child"]["resourceId"] if "child" in rel else None
+                        father: str | None = rel.get("parent1", {}).get("resourceId")
+                        mother: str | None = rel.get("parent2", {}).get("resourceId")
+                        child: str | None = rel.get("child", {}).get("resourceId")
                         if child in self.indi:
                             self.indi[child].parents.add((father, mother))
                         if father in self.indi:
@@ -708,30 +1183,120 @@ class Tree:
                                 )
             new_fids = new_fids[MAX_PERSONS:]
 
-    def add_fam(self, father, mother):
-        """add a family to the family tree
-        :param father: the father fid or None
-        :param mother: the mother fid or None
-        """
-        if (father, mother) not in self.fam:
-            self.fam[(father, mother)] = Fam(father, mother, self)
+    def ensure_source(self, source_data: Dict[str, Any]) -> Source:
+        if source_data["id"] not in self.sources:
+            self.sources[source_data["id"]] = Source(source_data, self)
+        return self.sources.get(source_data["id"])
+    
+    def ensure_citation(self, data: Dict[str, Any], source: Source) -> Citation:
+        citation_id = data["id"]
+        if citation_id not in self.citations:
+            self.citations[citation_id] = Citation(data, source)
+        return self.citations[citation_id]
 
-    def add_trio(self, father, mother, child):
+    def ensure_family(self, father: Optional['Indi'], mother: Optional['Indi']) -> Fam:
+        fam_id = Fam.gen_id(father, mother)
+        if fam_id not in self.fam:
+            self.fam[fam_id] = Fam(father, mother, self)
+        return self.fam[fam_id]
+
+
+    def place_by_geoname_id(self, id: str) -> Optional[Place]:
+        for place in self.places:
+            if place.id == id:
+                return place
+        return None
+
+    def get_by_geonames_id(self, geonames_id: str) -> Place:
+        print('Fetching place hierarchy for', geonames_id, file=sys.stderr)
+        hierarchy = geocoder.geonames(
+            geonames_id,
+            key=self.geonames_key,
+            lang=['hu', 'en', 'de'],
+            method='hierarchy',
+            session=self.geosession,
+        )
+
+        if hierarchy and hierarchy.ok:
+            last_place = None
+            for item in hierarchy.geojson.get('features', []):
+                properties = item.get('properties', {})
+                code = properties.get('code')
+                
+                if code in ['AREA', 'CONT']:
+                    continue
+                
+                print('Properties', properties, file=sys.stderr)
+                id = 'GEO' + str(properties['geonames_id'])
+                place = self.place_by_geoname_id(id)
+                if place is None:
+                    place = Place(
+                        id,
+                        properties.get('address'),
+                        GEONAME_FEATURE_MAP.get(code, 'Unknown'),
+                        last_place,
+                        properties.get('lat'),
+                        properties.get('lng')
+                    )
+                    self.places.append(place)
+                last_place = place
+            return last_place
+
+    @property        
+    def _next_place_counter(self):
+        self.place_counter += 1
+        return self.place_counter
+
+        
+    def ensure_place(self, place_name: str, fid: Optional[str] = None, coord: Optional[Tuple[float, float]] = None) -> Place:
+        if place_name not in self.places_by_names:
+            place = None
+            if self.geonames_key:
+                print('Fetching place', place_name, file=sys.stderr)
+                geoname_record = geocoder.geonames(
+                    place_name,
+                    key=self.geonames_key,
+                    session=self.geosession,
+                )
+                if geoname_record and geoname_record.ok:
+                    place = self.get_by_geonames_id(geoname_record.geonames_id)
+            if place is None:
+                coord = self.place_cache.get(fid) if coord is None else coord
+                place = Place(
+                    'PFSID' + fid if fid is not None else 'P' + str(self._next_place_counter),
+                    place_name,
+                    latitude=coord[0] if coord is not None else None,
+                    longitude=coord[1] if coord is not None else None
+                )
+                self.places.append(place)
+            self.places_by_names[place_name] = place
+        return self.places_by_names[place_name]
+
+    # def add_fam(self, father, mother):
+    #     """add a family to the family tree
+    #     :param father: the father fid or None
+    #     :param mother: the mother fid or None
+    #     """
+    #     if (father, mother) not in self.fam:
+    #         self.fam[(father, mother)] = Fam(father, mother, self)
+
+    def add_trio(self, father: Indi | None, mother: Indi | None, child: Indi | None):
         """add a children relationship to the family tree
         :param father: the father fid or None
         :param mother: the mother fid or None
         :param child: the child fid or None
         """
-        if father in self.indi:
-            self.indi[father].add_fams((father, mother))
-        if mother in self.indi:
-            self.indi[mother].add_fams((father, mother))
-        if child in self.indi and (father in self.indi or mother in self.indi):
-            self.indi[child].add_famc((father, mother))
-            self.add_fam(father, mother)
-            self.fam[(father, mother)].add_child(child)
+        fam = self.ensure_family(father, mother)
+        if child is not None:
+            fam.add_child(child)
+            child.add_famc(fam)
+        
+        if father is not None:
+            father.add_fams(fam)
+        if mother is not None:
+            mother.add_fams(fam)
 
-    def add_parents(self, fids):
+    def add_parents(self, fids: Set[str]):
         """add parents relationships
         :param fids: a set of fids
         """
@@ -751,27 +1316,34 @@ class Tree:
                     or not mother
                     and father in self.indi
                 ):
-                    self.add_trio(father, mother, fid)
+                    self.add_trio(
+                        self.indi.get(father), 
+                        self.indi.get(mother), 
+                        self.indi.get(fid),
+                    )
         return set(filter(None, parents))
 
-    def add_spouses(self, fids):
+    def add_spouses(self, fids: Set[str]):
         """add spouse relationships
         :param fids: a set of fid
         """
 
-        async def add(loop, rels):
+        async def add(loop, rels: Set[Tuple[str, str, str]]):
             futures = set()
             for father, mother, relfid in rels:
-                if (father, mother) in self.fam:
+                if father in self.exclude or mother in self.exclude:
+                    continue
+                fam_id = Fam.gen_id(self.indi[father], self.indi[mother])
+                if self.fam.get(fam_id):
                     futures.add(
                         loop.run_in_executor(
-                            None, self.fam[(father, mother)].add_marriage, relfid
+                            None, self.fam[fam_id].add_marriage, relfid
                         )
                     )
             for future in futures:
                 await future
 
-        rels = set()
+        rels: Set[Tuple[str, str, str]] = set()
         for fid in fids & self.indi.keys():
             rels |= self.indi[fid].spouses
         loop = asyncio.get_event_loop()
@@ -781,16 +1353,19 @@ class Tree:
             )
             for father, mother, _ in rels:
                 if father in self.indi and mother in self.indi:
-                    self.indi[father].add_fams((father, mother))
-                    self.indi[mother].add_fams((father, mother))
-                    self.add_fam(father, mother)
+                    father_indi = self.indi[father]
+                    mother_indi = self.indi[mother]
+                    fam = self.ensure_family(father_indi, mother_indi)
+                    father_indi.add_fams(fam)
+                    mother_indi.add_fams(fam)
+
             loop.run_until_complete(add(loop, rels))
 
     def add_children(self, fids):
         """add children relationships
         :param fids: a set of fid
         """
-        rels = set()
+        rels: Set[Tuple[str, str, str]] = set()
         for fid in fids & self.indi.keys():
             rels |= self.indi[fid].children if fid in self.indi else set()
         children = set()
@@ -805,7 +1380,11 @@ class Tree:
                     or not mother
                     and father in self.indi
                 ):
-                    self.add_trio(father, mother, child)
+                    self.add_trio(
+                        self.indi.get(father),
+                        self.indi.get(mother),
+                        self.indi.get(child),
+                    )
                     children.add(child)
         return children
 
@@ -826,19 +1405,90 @@ class Tree:
 
     def reset_num(self):
         """reset all GEDCOM identifiers"""
-        for husb, wife in self.fam:
-            self.fam[(husb, wife)].husb_num = self.indi[husb].num if husb else None
-            self.fam[(husb, wife)].wife_num = self.indi[wife].num if wife else None
-            self.fam[(husb, wife)].chil_num = set(
-                self.indi[chil].num for chil in self.fam[(husb, wife)].chil_fid
-            )
-        for fid in self.indi:
-            self.indi[fid].famc_num = set(
-                self.fam[(husb, wife)].num for husb, wife in self.indi[fid].famc_fid
-            )
-            self.indi[fid].fams_num = set(
-                self.fam[(husb, wife)].num for husb, wife in self.indi[fid].fams_fid
-            )
+        # for husb, wife in self.fam:
+        #     self.fam[(husb, wife)].husb_num = self.indi[husb].num if husb else None
+        #     self.fam[(husb, wife)].wife_num = self.indi[wife].num if wife else None
+        #     self.fam[(husb, wife)].chil_num = set(
+        #         self.indi[chil].num for chil in self.fam[(husb, wife)].chil_fid
+        #     )
+        # for fid in self.indi:
+        #     self.indi[fid].famc_num = set(
+        #         self.fam[(husb, wife)].num for husb, wife in self.indi[fid].famc_fid
+        #     )
+        #     self.indi[fid].fams_num = set(
+        #         self.fam[(husb, wife)].num for husb, wife in self.indi[fid].fams_fid
+        #     )            
+        #     self.indi[fid].famc_ids = set(
+        #         self.fam[(husb, wife)].id for husb, wife in self.indi[fid].famc_fid
+        #     )
+        #     self.indi[fid].fams_ids = set(
+        #         self.fam[(husb, wife)].id for husb, wife in self.indi[fid].fams_fid
+        #     )
+
+    def printxml(self, file: BinaryIO):
+
+#         root = ET.Element("root")
+#         doc = ET.SubElement(root, "doc")
+
+#         ET.SubElement(doc, "field1", name="blah").text = "some value1"
+#         ET.SubElement(doc, "field2", name="asdfasd").text = "some vlaue2"
+
+#         tree = ET.ElementTree(root)
+#         tree.write("filename.xml")
+
+#         <?xml version="1.0" encoding="UTF-8"?>
+# <!DOCTYPE database PUBLIC "-//Gramps//DTD Gramps XML 1.7.1//EN"
+# "http://gramps-project.org/xml/1.7.1/grampsxml.dtd">
+# <database xmlns="http://gramps-project.org/xml/1.7.1/">
+#   <header
+#     <created date="2024-07-07" version="5.2.2"/>
+#     <researcher>
+#       <resname>Barnabás Südy</resname>
+#     </researcher>
+#   </header>
+
+        root = ET.Element("database", xmlns="http://gramps-project.org/xml/1.7.1/")
+
+        header = ET.SubElement(root, "header")
+        ET.SubElement(header, "created", date=datetime.strftime(datetime.now(), "%Y-%m-%d"), version="5.2.2")
+        researcher = ET.SubElement(header, "researcher")
+        resname = ET.SubElement(researcher, "resname")
+        resname.text = self.display_name
+
+        people = ET.SubElement(root, "people")
+        for indi in sorted(self.indi.values(), key=lambda x: x.num):
+            indi.printxml(people)
+
+        families = ET.SubElement(root, "families")
+        for fam in sorted(self.fam.values(), key=lambda x: x.num):
+            fam.printxml(families)
+
+        events = ET.SubElement(root, "events")
+        for fact in self.facts:
+            fact.printxml(events)
+
+        notes = ET.SubElement(root, "notes")
+        for note in sorted(self.notes, key=lambda x: x.id):
+            note.printxml(notes)
+
+        places = ET.SubElement(root, "places")
+        for place in self.places:
+            place.printxml(places)
+
+        sources = ET.SubElement(root, "sources")
+        for source in self.sources.values():
+            source.printxml(sources)
+
+        citations = ET.SubElement(root, "citations")
+        for citation in self.citations.values():
+            citation.printxml(citations)
+
+        tree = ET.ElementTree(root)
+
+        doctype='<!DOCTYPE database PUBLIC "-//Gramps//DTD Gramps XML 1.7.1//EN" "http://gramps-project.org/xml/1.7.1/grampsxml.dtd">'
+        file.write(doctype.encode('utf-8'))
+        tree.write(file, 'utf-8')
+        
 
     def print(self, file=sys.stdout):
         """print family tree in GEDCOM format"""
@@ -855,19 +1505,19 @@ class Tree:
         file.write("1 SUBM @SUBM@\n")
         file.write("0 @SUBM@ SUBM\n")
         file.write("1 NAME %s\n" % self.display_name)
-        file.write("1 LANG %s\n" % self.lang)
+        # file.write("1 LANG %s\n" % self.lang)
 
         for fid in sorted(self.indi, key=lambda x: self.indi.__getitem__(x).num):
             self.indi[fid].print(file)
-        for husb, wife in sorted(self.fam, key=lambda x: self.fam.__getitem__(x).num):
-            self.fam[(husb, wife)].print(file)
+        for fam in sorted(self.fam.values(), key=lambda x: x.num):
+            fam.print(file)
         sources = sorted(self.sources.values(), key=lambda x: x.num)
         for s in sources:
             s.print(file)
-        notes = sorted(self.notes, key=lambda x: x.num)
+        notes = sorted(self.notes, key=lambda x: x.id)
         for i, n in enumerate(notes):
             if i > 0:
-                if n.num == notes[i - 1].num:
+                if n.id == notes[i - 1].id:
                     continue
             n.print(file)
         file.write("0 TRLR\n")
