@@ -88,39 +88,82 @@ class Gedcom:
         return True
 
     def __get_indi(self):
-        """Parse an individual"""
+        """Parse an individual (Analisa um registro de indivíduo no GEDCOM)"""
+        # Continua lendo linhas enquanto houver linhas no arquivo e
+        # o nível (level) da linha for maior que 0 (indicando que pertence ao INDI atual)
         while self.f and self.__get_line() and self.level > 0:
+            # Verifica a tag (tipo de informação) da linha atual
+
+            # --- NOME ---
             if self.tag == "NAME":
+                # Chama o método específico para analisar o nome
                 self.__get_name()
+
+            # --- SEXO ---
             elif self.tag == "SEX":
+                # Define o gênero do indivíduo ('M', 'F' ou 'U')
                 self.indi[self.num].gender = self.data
+
+            # --- FATOS/EVENTOS ---
+            # Verifica se a tag é um tipo de fato conhecido ou um evento genérico
             elif self.tag in FACT_TYPES or self.tag == "EVEN":
+                # Analisa o fato e o adiciona ao conjunto de fatos do indivíduo
                 self.indi[self.num].facts.add(self.__get_fact())
+
+            # --- ORDENAÇAS LDS ---
             elif self.tag == "BAPL":
+                # Batismo LDS
                 self.indi[self.num].baptism = self.__get_ordinance()
             elif self.tag == "CONL":
+                # Confirmação LDS
                 self.indi[self.num].confirmation = self.__get_ordinance()
             elif self.tag == "WAC":
+                # Iniciática LDS
                 self.indi[self.num].initiatory = self.__get_ordinance()
             elif self.tag == "ENDL":
+                # Dote LDS
                 self.indi[self.num].endowment = self.__get_ordinance()
             elif self.tag == "SLGC":
+                # Selo aos pais LDS
                 self.indi[self.num].sealing_child = self.__get_ordinance()
+
+            # --- RELACIONAMENTOS FAMILIARES ---
             elif self.tag == "FAMS":
+                # Adiciona o número da família onde este indivíduo é cônjuge
+                # ao conjunto de números de família do cônjuge (fams_num)
                 self.indi[self.num].fams_num.add(int(self.data[2 : len(self.data) - 1]))
             elif self.tag == "FAMC":
+                # Adiciona o número da família onde este indivíduo é filho
+                # ao conjunto de números de família filial (famc_num)
                 self.indi[self.num].famc_num.add(int(self.data[2 : len(self.data) - 1]))
+
+            # --- IDENTIFICADOR DO FAMILYSEARCH ---
             elif self.tag == "_FSFTID":
+                # Armazena o ID do FamilySearch do indivíduo
                 self.indi[self.num].fid = self.data
+
+            # --- NOTAS ---
             elif self.tag == "NOTE":
+                # Extrai o número da nota referenciada (@N123@ -> 123)
                 num = int(self.data[2 : len(self.data) - 1])
+                # Se a nota ainda não foi criada no dicionário temporário, cria
                 if num not in self.note:
                     self.note[num] = Note(tree=self.tree, num=num)
+                # Adiciona a nota ao conjunto de notas do indivíduo
                 self.indi[self.num].notes.add(self.note[num])
+
+            # --- FONTES ---
             elif self.tag == "SOUR":
+                # Analisa o link para a fonte e adiciona ao indivíduo
                 self.indi[self.num].sources.add(self.__get_link_source())
+
+            # --- OBJETOS (Memórias) ---
             elif self.tag == "OBJE":
+                # Analisa o objeto (memória) e adiciona ao indivíduo
                 self.indi[self.num].memories.add(self.__get_memorie())
+
+        # Define a flag para indicar que o parsing deste INDI terminou
+        # e a próxima chamada a __get_line deve reutilizar a última linha lida
         self.flag = True
 
     def __get_fam(self):

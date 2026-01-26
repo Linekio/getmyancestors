@@ -6,6 +6,7 @@ import webbrowser
 
 import requests
 from fake_useragent import UserAgent
+from requests_cache import CachedSession
 
 # local imports
 from getmyancestors.classes.translation import translations
@@ -14,14 +15,13 @@ DEFAULT_CLIENT_ID = "a02j000000KTRjpAAH"
 DEFAULT_REDIRECT_URI = "https://misbach.github.io/fs-auth/index_raw.html"
 
 
-class Session(requests.Session):
+class Session(CachedSession):
     """Create a FamilySearch session
     :param username and password: valid FamilySearch credentials
     :param verbose: True to active verbose mode
     :param logfile: a file object or similar
     :param timeout: time before retry a request
     """
-
     def __init__(
         self,
         username,
@@ -32,7 +32,7 @@ class Session(requests.Session):
         logfile=False,
         timeout=60,
     ):
-        super().__init__()
+        super().__init__(backend='sqlite')
         self.username = username
         self.password = password
         self.client_id = client_id or DEFAULT_CLIENT_ID
@@ -44,7 +44,7 @@ class Session(requests.Session):
         self.counter = 0
         self.headers = {"User-Agent": UserAgent().firefox}
         self.login()
-
+        
     @property
     def logged(self):
         return bool(self.cookies.get("fssessionid"))
