@@ -118,16 +118,16 @@ translations = {
     "Cut": {"fr": "Couper"},
     "Paste": {"fr": "Coller"},
     "Username:": {
-            "fr": "Nom d'utilisateur :",
-            "de": "Benutzername:",
+        "fr": "Nom d'utilisateur :",
+        "de": "Benutzername:",
     },
     "Password:": {
-            "fr": "Mot de passe :",
-            "de": "Passwort:",
+        "fr": "Mot de passe :",
+        "de": "Passwort:",
     },
     "Save Password": {
-            "fr": "Enregistrer le mot de passe",
-            "de": "Passwort speichern",
+        "fr": "Enregistrer le mot de passe",
+        "de": "Passwort speichern",
     },
     "ID already exist": {"fr": "Cet identifiant existe déjà"},
     "Invalid FamilySearch ID: ": {"fr": "Identifiant FamilySearch invalide : "},

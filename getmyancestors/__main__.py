@@ -1,3 +1,3 @@
-from getmyancestors import getmyancestors
+from getmyancestors import getmyanc
 
-getmyancestors.main()
+getmyanc.main()

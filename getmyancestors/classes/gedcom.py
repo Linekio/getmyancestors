@@ -1,15 +1,15 @@
 # mergemyancestors classes
+from getmyancestors.classes.constants import FACT_TYPES, ORDINANCES
 from getmyancestors.classes.tree import (
-    Indi,
     Fact,
     Fam,
+    Indi,
     Memorie,
     Name,
     Note,
     Ordinance,
     Source,
 )
-from getmyancestors.classes.constants import FACT_TYPES, ORDINANCES
 
 
 class Gedcom:
@@ -194,7 +194,7 @@ class Gedcom:
             if self.tag == "DATE":
                 fact.date = self.__get_text()
             elif self.tag == "PLAC":
-                fact.place = self.__get_text()
+                fact.place = self.tree.ensure_place(self.__get_text())
             elif self.tag == "MAP":
                 fact.map = self.__get_map()
             elif self.tag == "NOTE":

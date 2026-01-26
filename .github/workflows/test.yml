@@ -1,0 +1,62 @@
+---
+name: ci
+
+"on":
+  push: {}
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+
+    env:
+      SKIP_VENV: 1
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Fetch master (for incremental diff, lint filter mask)
+        run: git fetch origin master
+
+      - name: Reload Cache / pip
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3
+          cache: "pip" # caching pip dependencies
+          cache-dependency-path: "**/pyproject.toml"
+          # update-environment: false
+
+      - name: Install package with development dependencies
+        run: |
+          pip install ".[dev]"
+      - name: format
+        run: make format
+
+      - name: Lint
+        run: make lint
+
+      - name: Verify no new formatting changes applied
+        run: |
+          git update-index -q --refresh
+          git diff  # show the diff
+          git diff-index --quiet HEAD --  # exit non-zero on any diff
+
+      - name: Test [Unit]
+        env:
+          FAMILYSEARCH_USER: ${{ secrets.FAMILYSEARCH_USER }}
+          FAMILYSEARCH_PASS: ${{ secrets.FAMILYSEARCH_PASS }}
+        run: make test/unit
+
+      - name: Test [E2E]
+        env:
+          FAMILYSEARCH_USER: ${{ secrets.FAMILYSEARCH_USER }}
+          FAMILYSEARCH_PASS: ${{ secrets.FAMILYSEARCH_PASS }}
+        run: make test/e2e

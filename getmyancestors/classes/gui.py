@@ -1,26 +1,19 @@
 # fstogedcom classes and functions
+import asyncio
 import os
 import re
-import time
-import asyncio
 import tempfile
+import time
 from threading import Thread
+from tkinter import IntVar, Menu, StringVar, TclError, filedialog, messagebox
+from tkinter.ttk import Button, Checkbutton, Entry, Frame, Label, Notebook, Treeview
+
 from diskcache import Cache
 
-from tkinter import (
-    StringVar,
-    IntVar,
-    filedialog,
-    messagebox,
-    Menu,
-    TclError,
-)
-from tkinter.ttk import Frame, Label, Entry, Button, Checkbutton, Treeview, Notebook
-
-from getmyancestors.classes.tree import Indi, Fam, Tree
 from getmyancestors.classes.gedcom import Gedcom
 from getmyancestors.classes.session import Session
 from getmyancestors.classes.translation import translations
+from getmyancestors.classes.tree import Fam, Indi, Tree
 
 tmp_dir = os.path.join(tempfile.gettempdir(), "fstogedcom")
 cache = Cache(tmp_dir)
@@ -258,7 +251,13 @@ class SignIn(Frame):
 
         self.save_password = IntVar()
         self.save_password.set(cache.get("save_password") or 0)
-        check_save_password = Checkbutton(self, text=_("Save Password"), variable=self.save_password, onvalue=1, offvalue=0)
+        check_save_password = Checkbutton(
+            self,
+            text=_("Save Password"),
+            variable=self.save_password,
+            onvalue=1,
+            offvalue=0,
+        )
 
         label_username.grid(row=0, column=0, pady=15, padx=(0, 5))
         entry_username.grid(row=0, column=1)

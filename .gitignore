@@ -133,15 +133,18 @@ dmypy.json
 # Redis
 dump.rdb
 
-# Dotfiles
-.*
-!.gitignore
-!.readthedocs.yml
-
 # vscode
 .vscode/
 
 # getmyancestors stuff
 *.log
+*.txt
 *.settings
 *.ged
+*.db
+*.sqlite
+*.sqlite3
+
+!.geminiignore
+/test_debug.py
+

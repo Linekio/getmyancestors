@@ -1,4 +1,0 @@
-babelfish==0.6.1
-diskcache==5.6.3
-requests==2.32.3
-fake-useragent==2.0.3
