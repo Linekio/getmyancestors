@@ -70,20 +70,26 @@ def main():
                 tree.indi[fid].fid = ged.indi[num].fid
             tree.indi[fid].fams_fid |= ged.indi[num].fams_fid
             tree.indi[fid].famc_fid |= ged.indi[num].famc_fid
-            tree.indi[fid].name = ged.indi[num].name
-            tree.indi[fid].birthnames = ged.indi[num].birthnames
-            tree.indi[fid].nicknames = ged.indi[num].nicknames
-            tree.indi[fid].aka = ged.indi[num].aka
-            tree.indi[fid].married = ged.indi[num].married
-            tree.indi[fid].gender = ged.indi[num].gender
-            tree.indi[fid].facts = ged.indi[num].facts
-            tree.indi[fid].notes = ged.indi[num].notes
-            tree.indi[fid].sources = ged.indi[num].sources
-            tree.indi[fid].memories = ged.indi[num].memories
-            tree.indi[fid].baptism = ged.indi[num].baptism
-            tree.indi[fid].confirmation = ged.indi[num].confirmation
-            tree.indi[fid].initiatory = ged.indi[num].initiatory
-            tree.indi[fid].endowment = ged.indi[num].endowment
+            if not tree.indi[fid].name:
+                tree.indi[fid].name = ged.indi[num].name
+            tree.indi[fid].birthnames |= ged.indi[num].birthnames
+            tree.indi[fid].nicknames |= ged.indi[num].nicknames
+            tree.indi[fid].aka |= ged.indi[num].aka
+            tree.indi[fid].married |= ged.indi[num].married
+            if not tree.indi[fid].gender:
+                tree.indi[fid].gender = ged.indi[num].gender
+            tree.indi[fid].facts |= ged.indi[num].facts
+            tree.indi[fid].notes |= ged.indi[num].notes
+            tree.indi[fid].sources |= ged.indi[num].sources
+            tree.indi[fid].memories |= ged.indi[num].memories
+            if not tree.indi[fid].baptism:
+                tree.indi[fid].baptism = ged.indi[num].baptism
+            if not tree.indi[fid].confirmation:
+                tree.indi[fid].confirmation = ged.indi[num].confirmation
+            if not tree.indi[fid].initiatory:
+                tree.indi[fid].initiatory = ged.indi[num].initiatory
+            if not tree.indi[fid].endowment:
+                tree.indi[fid].endowment = ged.indi[num].endowment
             if not (tree.indi[fid].sealing_child and tree.indi[fid].sealing_child.famc):
                 tree.indi[fid].sealing_child = ged.indi[num].sealing_child
 
@@ -98,11 +104,11 @@ def main():
             if ged.fam[num].fid:
                 tree.fam[(husb, wife)].fid = ged.fam[num].fid
             if ged.fam[num].facts:
-                tree.fam[(husb, wife)].facts = ged.fam[num].facts
+                tree.fam[(husb, wife)].facts |= ged.fam[num].facts
             if ged.fam[num].notes:
-                tree.fam[(husb, wife)].notes = ged.fam[num].notes
+                tree.fam[(husb, wife)].notes |= ged.fam[num].notes
             if ged.fam[num].sources:
-                tree.fam[(husb, wife)].sources = ged.fam[num].sources
+                tree.fam[(husb, wife)].sources |= ged.fam[num].sources
             tree.fam[(husb, wife)].sealing_spouse = ged.fam[num].sealing_spouse
 
     # merge notes by text
