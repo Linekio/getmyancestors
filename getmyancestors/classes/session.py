@@ -34,6 +34,7 @@ class Session(requests.Session):
         logfile=False,
         timeout=60,
         rate_limit=None,
+        delay=0.1,
     ):
         super().__init__()
         self.username = username
@@ -43,6 +44,7 @@ class Session(requests.Session):
         self.verbose = verbose
         self.logfile = logfile
         self.timeout = timeout
+        self.delay = delay
         self.fid = self.lang = self.display_name = None
         self.counter = 0
         self.headers = {"User-Agent": UserAgent().firefox}

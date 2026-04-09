@@ -7,8 +7,8 @@ import sys
 import time
 from urllib.parse import unquote
 import getpass
-import asyncio
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 
 # local imports
 from getmyancestors.classes.tree import Tree
@@ -128,6 +128,38 @@ def main():
     parser.add_argument(
         "--redirect_uri", metavar="<STR>", type=str, help="Use Specific Redirect Uri"
     )
+    parser.add_argument(
+        "--no-sources",
+        action="store_true",
+        default=False,
+        help="Skip downloading sources [False]",
+    )
+    parser.add_argument(
+        "--no-notes",
+        action="store_true",
+        default=False,
+        help="Skip downloading notes [False]",
+    )
+    parser.add_argument(
+        "--no-memories",
+        action="store_true",
+        default=False,
+        help="Skip downloading memories [False]",
+    )
+    parser.add_argument(
+        "--concurrency",
+        metavar="<INT>",
+        type=int,
+        default=10,
+        help="Number of concurrent download threads [10]",
+    )
+    parser.add_argument(
+        "--delay",
+        metavar="<FLOAT>",
+        type=float,
+        default=0.1,
+        help="Delay between requests in seconds [0.1]",
+    )
 
     # extract arguments from the command line
     try:
@@ -190,11 +222,12 @@ def main():
         args.logfile,
         args.timeout,
         args.rate_limit,
+        args.delay,
     )
     if not fs.logged:
         sys.exit(2)
     _ = fs._
-    tree = Tree(fs)
+    tree = Tree(fs, no_sources=args.no_sources, no_memories=args.no_memories)
 
     # check LDS account
     if args.get_ordinances:
@@ -244,22 +277,6 @@ def main():
             tree.add_spouses(todo)
 
         # download ordinances, notes and contributors
-        async def download_stuff(loop):
-            futures = set()
-            for fid, indi in tree.indi.items():
-                futures.add(loop.run_in_executor(None, indi.get_notes))
-                if args.get_ordinances:
-                    futures.add(loop.run_in_executor(None, tree.add_ordinances, fid))
-                if args.get_contributors:
-                    futures.add(loop.run_in_executor(None, indi.get_contributors))
-            for fam in tree.fam.values():
-                futures.add(loop.run_in_executor(None, fam.get_notes))
-                if args.get_contributors:
-                    futures.add(loop.run_in_executor(None, fam.get_contributors))
-            for future in futures:
-                await future
-
-        loop = asyncio.get_event_loop()
         print(
             _("Downloading notes")
             + (
@@ -271,7 +288,22 @@ def main():
             + "...",
             file=sys.stderr,
         )
-        loop.run_until_complete(download_stuff(loop))
+        with ThreadPoolExecutor(max_workers=args.concurrency) as executor:
+            futures = []
+            for fid, indi in tree.indi.items():
+                if not args.no_notes:
+                    futures.append(executor.submit(indi.get_notes))
+                if args.get_ordinances:
+                    futures.append(executor.submit(tree.add_ordinances, fid))
+                if args.get_contributors:
+                    futures.append(executor.submit(indi.get_contributors))
+            for fam in tree.fam.values():
+                if not args.no_notes:
+                    futures.append(executor.submit(fam.get_notes))
+                if args.get_contributors:
+                    futures.append(executor.submit(fam.get_contributors))
+            for future in futures:
+                future.result()
 
     finally:
         # compute number for family relationships and print GEDCOM file
