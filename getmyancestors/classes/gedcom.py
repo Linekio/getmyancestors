@@ -153,8 +153,9 @@ class Gedcom:
         name = Name()
         added = False
         name.given = parts[0].strip()
-        name.surname = parts[1].strip()
-        if parts[2]:
+        if len(parts) > 1:
+            name.surname = parts[1].strip()
+        if len(parts) > 2 and parts[2]:
             name.suffix = parts[2]
         if not self.indi[self.num].name:
             self.indi[self.num].name = name
