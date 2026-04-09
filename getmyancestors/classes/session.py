@@ -71,7 +71,7 @@ class Session(requests.Session):
         """retrieve FamilySearch session ID
         (https://familysearch.org/developers/docs/guides/oauth2)
         """
-        while True:
+        for attempt in range(5):
             try:
                 url = "https://www.familysearch.org/auth/familysearch/login"
                 self.write_log("Downloading: " + url)
@@ -167,7 +167,7 @@ class Session(requests.Session):
         base = "https://api.familysearch.org"
         if no_api:
             base = "https://familysearch.org"
-        while True:
+        for attempt in range(10):
             try:
                 self.write_log("Downloading: " + url)
                 r = self.get(base + url, timeout=self.timeout, headers=headers)
@@ -181,9 +181,13 @@ class Session(requests.Session):
             self.write_log("Status code: %s" % r.status_code)
             if r.status_code == 204:
                 return None
-            if r.status_code in {404, 405, 410, 500}:
+            if r.status_code in {404, 405, 410}:
                 self.write_log("WARNING: " + url)
                 return None
+            if r.status_code == 500:
+                self.write_log("WARNING: HTTP 500 from " + url)
+                time.sleep(self.timeout)
+                continue
             if r.status_code == 401:
                 self.login()
                 continue
@@ -214,6 +218,8 @@ class Session(requests.Session):
             except Exception as e:
                 self.write_log("WARNING: corrupted file from %s, error: %s" % (url, e))
                 return None
+        self.write_log("WARNING: max retries exceeded for %s" % url)
+        return None
 
     def set_current(self):
         """retrieve FamilySearch current user ID, name and language"""
