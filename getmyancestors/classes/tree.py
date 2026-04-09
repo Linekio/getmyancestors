@@ -350,7 +350,7 @@ class Indi:
                         )
                     else:
                         self.facts.add(Fact(x, self.tree))
-            if "sources" in data:
+            if "sources" in data and not self.tree.no_sources:
                 sources = self.tree.fs.get_url(
                     "/platform/tree/persons/%s/sources" % self.fid
                 )
@@ -368,6 +368,8 @@ class Indi:
                         self.sources.add(
                             (self.tree.sources[source["id"]], quotes[source["id"]])
                         )
+            if self.tree.no_memories:
+                return
             for evidence in data.get("evidence", []):
                 memory_id, *_ = evidence["id"].partition("-")
                 url = "/platform/memories/memories/%s" % memory_id
@@ -634,8 +636,10 @@ class Tree:
     :param fs: a Session object
     """
 
-    def __init__(self, fs=None):
+    def __init__(self, fs=None, no_sources=False, no_memories=False):
         self.fs = fs
+        self.no_sources = no_sources
+        self.no_memories = no_memories
         self.indi = dict()
         self.fam = dict()
         self.notes = list()
