@@ -93,7 +93,7 @@ class Session(requests.Session):
                 url = f"https://ident.familysearch.org/cis-web/oauth2/v3/authorization"
                 params = {
                     "response_type": "code",
-                    "scope": "profile email qualifies_for_affiliate_account country",
+                    "scope": "openid profile email qualifies_for_affiliate_account country",
                     "client_id": self.client_id,
                     "redirect_uri": self.redirect_uri,
                     "username": self.username,
