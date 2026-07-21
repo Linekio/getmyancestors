@@ -14,6 +14,7 @@ from getmyancestors.classes.translation import translations
 
 DEFAULT_CLIENT_ID = "a02j000000KTRjpAAH"
 DEFAULT_REDIRECT_URI = "https://misbach.github.io/fs-auth/index_raw.html"
+DEFAULT_TREE = "GLOBAL"
 
 
 class Session(requests.Session):
@@ -34,6 +35,7 @@ class Session(requests.Session):
         logfile=False,
         timeout=60,
         rate_limit=None,
+        tree=DEFAULT_TREE,
     ):
         super().__init__()
         self.username = username
@@ -46,6 +48,7 @@ class Session(requests.Session):
         self.fid = self.lang = self.display_name = None
         self.counter = 0
         self.headers = {"User-Agent": UserAgent().firefox}
+        self._tree = tree
 
         # Apply a rate-limit (max # requests per second) to all endpoints
         if rate_limit:
@@ -54,10 +57,52 @@ class Session(requests.Session):
             self.mount('https://', adapter)
 
         self.login()
+        if self._tree and self._tree != DEFAULT_TREE:
+            self._set_tree(self._tree)
+
+    @property
+    def tree(self):
+        """Returns the Group Tree ID (XXXX-XXXX)"""
+        return self._tree
 
     @property
     def logged(self):
         return bool(self.cookies.get("fssessionid"))
+
+    def _set_tree(self, tree_id: str):
+        url = "https://api.familysearch.org/platform/trees/current"
+        headers = {
+            **self.headers,
+            "Content-Type": "application/x-fs-v1+json",
+            "Accept": "*/*",
+        }
+        payload = {"trees": [{"id": tree_id}]}
+        while True:
+            try:
+                response = self.post(url, headers=headers, json=payload)
+                response.raise_for_status()
+                return
+            except requests.exceptions.HTTPError:
+                if response.status_code == 400:
+                    # 400 is also returned for an invalid bearer token, but
+                    # _set_tree is only called after a successful login(), so
+                    # a valid token is guaranteed at this point.
+                    self.write_log("Invalid tree ID: %s" % tree_id)
+                    sys.exit("Error: invalid tree ID '%s'" % tree_id)
+                if response.status_code == 429:
+                    self.write_log("Rate limited, retrying")
+                    time.sleep(self.timeout)
+                    continue
+                self.write_log("HTTPError %s setting tree" % response.status_code)
+                time.sleep(self.timeout)
+                continue
+            except requests.exceptions.ReadTimeout:
+                self.write_log("Read timed out")
+                continue
+            except requests.exceptions.ConnectionError:
+                self.write_log("Connection aborted")
+                time.sleep(self.timeout)
+                continue
 
     def write_log(self, text):
         """write text in the log file"""

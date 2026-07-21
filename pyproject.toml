@@ -1,7 +1,7 @@
 [project]
 name = "getmyancestors"
 description = "Retrieve GEDCOM data from FamilySearch Tree"
-requires-python = ">=3.7"
+requires-python = ">=3.9"
 license = {text = "GNU"}
 keywords = [
   "getmyancestors",
@@ -38,3 +38,6 @@ getmyancestors = ["fstogedcom.png"]
 getmyancestors = "getmyancestors.getmyancestors:main"
 mergemyancestors = "getmyancestors.mergemyancestors:main"
 fstogedcom = "getmyancestors.fstogedcom:main"
+
+[tool.uv]
+package = true  # required for CLI entry points (getmyancestors, mergemyancestors, fstogedcom) to be installed
