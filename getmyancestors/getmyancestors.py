@@ -12,8 +12,7 @@ import argparse
 
 # local imports
 from getmyancestors.classes.tree import Tree
-from getmyancestors.classes.session import Session
-
+from getmyancestors.classes.session import Session, DEFAULT_TREE
 
 
 def main():
@@ -27,6 +26,10 @@ def main():
     )
     parser.add_argument(
         "-p", "--password", metavar="<STR>", type=str, help="FamilySearch password"
+    )
+    parser.add_argument(
+        "-T", "--tree", metavar="<STR>", type=str, default=DEFAULT_TREE,
+        help="Group tree ID; omit to use the main Family Tree [%s]" % DEFAULT_TREE,
     )
     parser.add_argument(
         "-i",
@@ -190,6 +193,7 @@ def main():
         args.logfile,
         args.timeout,
         args.rate_limit,
+        args.tree,
     )
     if not fs.logged:
         sys.exit(2)
