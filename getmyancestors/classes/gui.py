@@ -560,7 +560,7 @@ class Download(Frame):
             if not todo:
                 break
             done |= todo
-            self.info(_("Downloading %s. of generations of ancestors...") % (i + 1))
+            self.info(_("Downloading generation %s of ancestors...") % (i + 1))
             todo = self.tree.add_parents(todo) - done
 
         todo = set(self.tree.indi.keys())
@@ -569,7 +569,7 @@ class Download(Frame):
             if not todo:
                 break
             done |= todo
-            self.info(_("Downloading %s. of generations of descendants...") % (i + 1))
+            self.info(_("Downloading generation %s of descendants...") % (i + 1))
             todo = self.tree.add_children(todo) - done
 
         if self.options.spouses.get():

@@ -100,8 +100,8 @@ translations = {
     "Downloading starting individuals...": {
         "fr": "Téléchargement des personnes de départ..."
     },
-    "Downloading %s. of generations of descendants...": {
-        "fr": "Téléchargement de %s génération(s) de descendants..."
+    "Downloading generation %s of descendants...": {
+        "fr": "Téléchargement de la génération %s de descendants..."
     },
     "Downloading spouses and marriage information...": {
         "fr": "Téléchargement des conjoints et des informations de mariage..."
@@ -153,8 +153,8 @@ translations = {
         "fr": "Le nom d'utilisateur ou le mot de passe est incorrect"
     },
     "Options": {"fr": "Options"},
-    "Downloading %s. of generations of ancestors...": {
-        "fr": "Téléchargement de %s génération(s) d'ancêtres..."
+    "Downloading generation %s of ancestors...": {
+        "fr": "Téléchargement de la génération %s d'ancêtres..."
     },
     "Save": {"fr": "Sauvegarder"},
     "Success ! Click below to save your GEDCOM file": {

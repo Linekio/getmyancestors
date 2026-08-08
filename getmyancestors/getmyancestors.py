@@ -1,16 +1,19 @@
+# coding: utf-8
+
 # global imports
 from __future__ import print_function
 import re
 import sys
 import time
+import logging
 from urllib.parse import unquote
 import getpass
+import asyncio
 import argparse
-from concurrent.futures import ThreadPoolExecutor
 
 # local imports
 from getmyancestors.classes.tree import Tree
-from getmyancestors.classes.session import Session
+from getmyancestors.classes.session import Session, logger
 
 
 
@@ -87,12 +90,6 @@ def main():
         help="Timeout in seconds [60]",
     )
     parser.add_argument(
-        "--rate-limit",
-        metavar="<INT>",
-        type=int,
-        help="Max # requests per second",
-    )
-    parser.add_argument(
         "--show-password",
         action="store_true",
         default=False,
@@ -121,10 +118,18 @@ def main():
         help="output log file [stderr]",
     )
     parser.add_argument(
-        "--client_id", metavar="<STR>", type=str, help="Use Specific Client ID"
+        "--concurrency",
+        metavar="<INT>",
+        type=int,
+        default=20,
+        help="number of concurrent worker threads [20]",
     )
     parser.add_argument(
-        "--redirect_uri", metavar="<STR>", type=str, help="Use Specific Redirect Uri"
+        "--max-attempts",
+        metavar="<INT>",
+        type=int,
+        default=10,
+        help="max retry attempts per failed request [10]",
     )
     parser.add_argument(
         "--no-sources",
@@ -145,18 +150,10 @@ def main():
         help="Skip downloading memories [False]",
     )
     parser.add_argument(
-        "--concurrency",
-        metavar="<INT>",
-        type=int,
-        default=10,
-        help="Number of concurrent download threads [10]",
+        "--client_id", metavar="<STR>", type=str, help="Use Specific Client ID"
     )
     parser.add_argument(
-        "--delay",
-        metavar="<FLOAT>",
-        type=float,
-        default=0.1,
-        help="Delay between requests in seconds [0.1]",
+        "--redirect_uri", metavar="<STR>", type=str, help="Use Specific Redirect Uri"
     )
 
     # extract arguments from the command line
@@ -209,18 +206,34 @@ def main():
                 "Unable to write %s: %s" % (settings_name, repr(exc)), file=sys.stderr
             )
 
+    # configure logging
+    log_format = "%(asctime)s %(levelname)-8s %(message)s"
+    log_datefmt = "%Y-%m-%d %H:%M:%S"
+    handlers = []
+    handlers.append(logging.StreamHandler(sys.stderr))
+    if args.logfile:
+        handlers.append(logging.FileHandler(args.logfile, encoding="UTF-8"))
+    logging.basicConfig(
+        level=logging.DEBUG if args.verbose else logging.INFO,
+        format=log_format,
+        datefmt=log_datefmt,
+        handlers=handlers,
+    )
+    for name in ("urllib3",):
+        logging.getLogger(name).setLevel(logging.WARNING)
+
     # initialize a FamilySearch session and a family tree object
-    print("Login to FamilySearch...", file=sys.stderr)
+    logger.info("Login to FamilySearch...")
     fs = Session(
         args.username,
         args.password,
         args.client_id,
         args.redirect_uri,
         args.verbose,
-        args.logfile,
+        None,  # logfile handled by logging config
         args.timeout,
-        args.rate_limit,
-        args.delay,
+        concurrency=args.concurrency,
+        max_attempts=args.max_attempts,
     )
     if not fs.logged:
         sys.exit(2)
@@ -233,13 +246,13 @@ def main():
             "/service/tree/tree-data/reservations/person/%s/ordinances" % fs.fid, {}, no_api=True
         )
         if not test or test["status"] != "OK":
-            print("Need an LDS account")
+            logger.warning("Need an LDS account")
             sys.exit(2)
 
     try:
         # add list of starting individuals to the family tree
         todo = args.individuals if args.individuals else [fs.fid]
-        print(_("Downloading starting individuals..."), file=sys.stderr)
+        logger.info(_("Downloading starting individuals..."))
         tree.add_indis(todo)
 
         # download ancestors
@@ -249,9 +262,8 @@ def main():
             if not todo:
                 break
             done |= todo
-            print(
-                _("Downloading %s. of generations of ancestors...") % (i + 1),
-                file=sys.stderr,
+            logger.info(
+                _("Downloading generation %s of ancestors...") % (i + 1)
             )
             todo = tree.add_parents(todo) - done
 
@@ -262,20 +274,37 @@ def main():
             if not todo:
                 break
             done |= todo
-            print(
-                _("Downloading %s. of generations of descendants...") % (i + 1),
-                file=sys.stderr,
+            logger.info(
+                _("Downloading generation %s of descendants...") % (i + 1)
             )
             todo = tree.add_children(todo) - done
 
         # download spouses
         if args.marriage:
-            print(_("Downloading spouses and marriage information..."), file=sys.stderr)
+            logger.info(_("Downloading spouses and marriage information..."))
             todo = set(tree.indi.keys())
             tree.add_spouses(todo)
 
         # download ordinances, notes and contributors
-        print(
+        async def download_stuff(loop):
+            futures = set()
+            for fid, indi in tree.indi.items():
+                if not args.no_notes:
+                    futures.add(loop.run_in_executor(None, indi.get_notes))
+                if args.get_ordinances:
+                    futures.add(loop.run_in_executor(None, tree.add_ordinances, fid))
+                if args.get_contributors:
+                    futures.add(loop.run_in_executor(None, indi.get_contributors))
+            for fam in tree.fam.values():
+                if not args.no_notes:
+                    futures.add(loop.run_in_executor(None, fam.get_notes))
+                if args.get_contributors:
+                    futures.add(loop.run_in_executor(None, fam.get_contributors))
+            for future in futures:
+                await future
+
+        loop = asyncio.get_event_loop()
+        logger.info(
             _("Downloading notes")
             + (
                 (("," if args.get_contributors else _(" and")) + _(" ordinances"))
@@ -283,31 +312,22 @@ def main():
                 else ""
             )
             + (_(" and contributors") if args.get_contributors else "")
-            + "...",
-            file=sys.stderr,
+            + "..."
         )
-        with ThreadPoolExecutor(max_workers=args.concurrency) as executor:
-            futures = []
-            for fid, indi in tree.indi.items():
-                if not args.no_notes:
-                    futures.append(executor.submit(indi.get_notes))
-                if args.get_ordinances:
-                    futures.append(executor.submit(tree.add_ordinances, fid))
-                if args.get_contributors:
-                    futures.append(executor.submit(indi.get_contributors))
-            for fam in tree.fam.values():
-                if not args.no_notes:
-                    futures.append(executor.submit(fam.get_notes))
-                if args.get_contributors:
-                    futures.append(executor.submit(fam.get_contributors))
-            for future in futures:
-                future.result()
+        loop.run_until_complete(download_stuff(loop))
 
     finally:
+        # Wait for all workers to drain the request queue
+        queued = fs.pending
+        if queued:
+            logger.info("Waiting for %d pending requests...", queued)
+        fs.stop_workers()
+
         # compute number for family relationships and print GEDCOM file
         tree.reset_num()
         tree.print(args.outfile)
-        print(
+        elapsed = round(time.time() - time_count)
+        logger.info(
             _(
                 "Downloaded %s individuals, %s families, %s sources and %s notes "
                 "in %s seconds with %s HTTP requests."
@@ -317,11 +337,13 @@ def main():
                 str(len(tree.fam)),
                 str(len(tree.sources)),
                 str(len(tree.notes)),
-                str(round(time.time() - time_count)),
+                str(elapsed),
                 str(fs.counter),
             ),
-            file=sys.stderr,
         )
+        logger.info("Statistics: retries=%d, max_attempts_reached=%d, backoff_time=%.1fs, status_codes=%s",
+                     fs.stats.retry_count, fs.stats.max_retries_reached,
+                     fs.stats.backoff_time / fs.concurrency, dict(fs.stats.status_codes))
 
 
 if __name__ == "__main__":
