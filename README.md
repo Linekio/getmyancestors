@@ -32,6 +32,12 @@ fstogedcom
 
 Command line examples:
 
+The username and password can also come from the `FS_USERNAME` and `FS_PASS` environment variables. Prefer that, or the prompt, over `-p`: a password on the command line is visible to other users in the process list.
+
+```
+FS_USERNAME=username FS_PASS=password getmyancestors -i LF7T-Y4C -o out.ged
+```
+
 Download four generations of ancestors for the main individual in your tree and output gedcom on stdout (will prompt for username and password):
 
 ```

@@ -1,5 +1,6 @@
 # global imports
 from __future__ import print_function
+import os
 import re
 import sys
 import time
@@ -171,13 +172,23 @@ def main():
             if not re.match(r"[A-Z0-9]{4}-[A-Z0-9]{3}", fid):
                 sys.exit("Invalid FamilySearch ID: " + fid)
 
+    # -u/-p, then FS_USERNAME/FS_PASS, then a prompt. A -p password is visible to
+    # every user on the machine in the process list for the whole run.
+    if args.password:
+        print(
+            "WARNING: -p exposes your password in the process list; "
+            "set FS_PASS instead.",
+            file=sys.stderr,
+        )
     args.username = (
-        args.username if args.username else input("Enter FamilySearch username: ")
+        args.username
+        or os.environ.get("FS_USERNAME")
+        or input("Enter FamilySearch username: ")
     )
     args.password = (
         args.password
-        if args.password
-        else getpass.getpass("Enter FamilySearch password: ")
+        or os.environ.get("FS_PASS")
+        or getpass.getpass("Enter FamilySearch password: ")
     )
 
     time_count = time.time()
