@@ -169,6 +169,7 @@ class Session(requests.Session):
         base = "https://api.familysearch.org"
         if no_api:
             base = "https://familysearch.org"
+        backoff = 1
         for attempt in range(10):
             try:
                 self.write_log("Downloading: " + url)
@@ -186,9 +187,17 @@ class Session(requests.Session):
             if r.status_code in {404, 405, 410}:
                 self.write_log("WARNING: " + url)
                 return None
-            if r.status_code == 500:
-                self.write_log("WARNING: HTTP 500 from " + url)
-                time.sleep(self.timeout)
+            if r.status_code in {429, 500, 503}:
+                # Wait as long as the server asks (Retry-After, in seconds), else back off.
+                try:
+                    wait = int(r.headers["Retry-After"])
+                except (KeyError, ValueError):
+                    wait = backoff
+                self.write_log(
+                    "HTTP %s from %s, waiting %s seconds" % (r.status_code, url, wait)
+                )
+                time.sleep(wait)
+                backoff = min(backoff * 2, 60)
                 continue
             if r.status_code == 401:
                 self.login()
