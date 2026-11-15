@@ -556,7 +556,7 @@ class Fam:
                         sources = self.tree.fs.get_url(
                             "/platform/tree/couple-relationships/%s/sources" % self.fid
                         )
-                        for source in sources["sourceDescriptions"]:
+                        for source in (sources or {}).get("sourceDescriptions", []):
                             if (
                                 source["id"] in new_sources
                                 and source["id"] not in self.tree.sources
@@ -564,7 +564,7 @@ class Fam:
                                 self.tree.sources[source["id"]] = Source(
                                     source, self.tree
                                 )
-                    for source_fid in quotes:
+                    for source_fid in quotes.keys() & self.tree.sources.keys():
                         self.sources.add(
                             (self.tree.sources[source_fid], quotes[source_fid])
                         )
