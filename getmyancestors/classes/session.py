@@ -170,6 +170,8 @@ class Session(requests.Session):
         if no_api:
             base = "https://familysearch.org"
         for attempt in range(10):
+            if self.delay > 0:
+                time.sleep(self.delay)
             try:
                 self.write_log("Downloading: " + url)
                 r = self.get(base + url, timeout=self.timeout, headers=headers)
