@@ -941,10 +941,10 @@ class Tree:
         file.write(
             "1 DATE {:02d} {} {}\n".format(
                 today.day,
-                GEDCOM_MONTHS[today.moth - 1],
-                today.years,
+                GEDCOM_MONTHS[today.month - 1],
+                today.year,
             )
-        )
+)
         file.write("2 TIME %s\n" % time.strftime("%H:%M:%S"))
         file.write("1 SUBM @SUBM@\n")
         file.write("0 @SUBM@ SUBM\n")
