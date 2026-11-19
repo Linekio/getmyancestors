@@ -24,6 +24,27 @@ class TestSourceExport(
             expected, output.getvalue()
         )
 
+    def test_source_text_has_no_trailing_spaces(
+        self,
+    ):
+        source = Source(num=2)
+        source.fid = "SOURCE-456"
+        source.title = (
+            "Parish register   "
+        )
+
+        output = io.StringIO()
+        source.print(output)
+
+        for (
+            line
+        ) in (
+            output.getvalue().splitlines()
+        ):
+            self.assertEqual(
+                line, line.rstrip(" \t")
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
