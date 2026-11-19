@@ -108,7 +108,7 @@ class Source:
 
     def print(self, file=sys.stdout):
         """print Source in GEDCOM format"""
-        file.write("0 @S%s@ SOUR \n" % self.num)
+        file.write("0 @S%s@ SOUR\n" % self.num)
         if self.title:
             file.write(cont("1 TITL " + self.title))
         if self.citation:
