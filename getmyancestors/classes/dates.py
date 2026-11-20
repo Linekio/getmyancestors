@@ -6,6 +6,8 @@ import unicodedata
 from datetime import date
 
 
+# GEDCOM month abbreviations followed by accepted source-language aliases.
+# The aliases are input data, not translated output or interface messages.
 MONTH_NAMES = (
     ("JAN", "JANUARY", "ENERO", "XANEIRO", "JANEIRO"),
     ("FEB", "FEBRUARY", "FEBRERO", "FEBREIRO", "FEVEREIRO"),
