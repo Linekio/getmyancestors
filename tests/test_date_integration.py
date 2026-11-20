@@ -143,7 +143,7 @@ class TestDateIntegration(
         )
 
     def test_unconverted_ordinance_date_survives_roundtrip(self):
-        original = "During an unknown winter"
+        original = "Possibly during the winter of the year 1850"
         tree = Tree()
         tree.display_name = "Test"
         tree.lang = "English"
