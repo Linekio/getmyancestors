@@ -2,36 +2,30 @@
 """Convert FamilySearch dates into GEDCOM 5.5.1 dates."""
 
 import re
-import unicodedata
 from datetime import date
 
 
-# GEDCOM month abbreviations followed by accepted source-language aliases.
-# The aliases are input data, not translated output or interface messages.
+# Recognize GEDCOM abbreviations and English month names only.
+# Other languages rely on GEDCOM X formal dates supplied by FamilySearch.
 MONTH_NAMES = (
-    ("JAN", "JANUARY", "ENERO", "XANEIRO", "JANEIRO"),
-    ("FEB", "FEBRUARY", "FEBRERO", "FEBREIRO", "FEVEREIRO"),
-    ("MAR", "MARCH", "MARZO", "MARÇO"),
-    ("APR", "APRIL", "ABR", "ABRIL"),
-    ("MAY", "MAYO", "MAIO"),
-    ("JUN", "JUNE", "JUNIO", "XUÑO", "JUNHO"),
-    ("JUL", "JULY", "JULIO", "XULLO", "JULHO"),
-    ("AUG", "AUGUST", "AGOSTO"),
-    ("SEP", "SEPT", "SEPTEMBER", "SEPTIEMBRE", "SETIEMBRE", "SETEMBRO"),
-    ("OCT", "OCTOBER", "OCTUBRE", "OUTUBRO"),
-    ("NOV", "NOVEMBER", "NOVIEMBRE", "NOVEMBRO"),
-    ("DEC", "DECEMBER", "DICIEMBRE", "DECEMBRO", "DEZEMBRO"),
+    ("JAN", "JANUARY"),
+    ("FEB", "FEBRUARY"),
+    ("MAR", "MARCH"),
+    ("APR", "APRIL"),
+    ("MAY",),
+    ("JUN", "JUNE"),
+    ("JUL", "JULY"),
+    ("AUG", "AUGUST"),
+    ("SEP", "SEPT", "SEPTEMBER"),
+    ("OCT", "OCTOBER"),
+    ("NOV", "NOVEMBER"),
+    ("DEC", "DECEMBER"),
 )
 
 GEDCOM_MONTHS = tuple(names[0] for names in MONTH_NAMES)
 
 
 def _key(value):
-    value = unicodedata.normalize("NFKD", value)
-    value = "".join(
-        char for char in value
-        if not unicodedata.combining(char)
-    )
     return value.upper().strip(".,")
 
 
@@ -96,8 +90,7 @@ def _simple_date(text):
         return None
 
     match = re.fullmatch(
-        r"(\d{1,2})\s+(?:de\s+)?([^\d\s]+)"
-        r"\s+(?:de\s+)?(\d{3,4})",
+        r"(\d{1,2})\s+([^\d\s]+)\s+(\d{3,4})",
         text,
         re.IGNORECASE,
     )
@@ -121,7 +114,7 @@ def _simple_date(text):
             return _calendar_date(year, month, day)
 
     match = re.fullmatch(
-        r"([^\d\s]+)\s+(?:de\s+)?(\d{3,4})",
+        r"([^\d\s]+)\s+(\d{3,4})",
         text,
         re.IGNORECASE,
     )
@@ -177,7 +170,7 @@ def _formal_fallback(original, text, formal):
     if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
         return _fallback(original, text)
     named_date = re.fullmatch(
-        r"(\d{1,2})\s+(?:de\s+)?([^\d\s]+)\s+(?:de\s+)?(\d{3,4})",
+        r"(\d{1,2})\s+([^\d\s]+)\s+(\d{3,4})",
         text,
         re.IGNORECASE,
     )
@@ -263,9 +256,7 @@ def normalize_gedcom_date(original, formal=None):
 
     ranges = (
         (r"(?:BET|BETWEEN)\s+(.+?)\s+AND\s+(.+)", "BET", "AND"),
-        (r"ENTRE\s+(.+?)\s+Y\s+(.+)", "BET", "AND"),
         (r"FROM\s+(.+?)\s+TO\s+(.+)", "FROM", "TO"),
-        (r"DESDE\s+(.+?)\s+HASTA\s+(.+)", "FROM", "TO"),
     )
 
     for pattern, prefix, separator in ranges:
@@ -286,11 +277,8 @@ def normalize_gedcom_date(original, formal=None):
             return _fallback(original, text)
 
     match = re.fullmatch(
-        r"(ABT|ABOUT|CIRCA|CA\.?|HACIA|"
-        r"APROX\.?|APROXIMADAMENTE|CAL|EST|"
-        r"BEF|BEFORE|ANTES DE|"
-        r"AFT|AFTER|DESPU[EÉ]S DE|"
-        r"FROM|TO)\s+(.+)",
+        r"(ABT|ABOUT|CIRCA|CA\.?|CAL|EST|"
+        r"BEF|BEFORE|AFT|AFTER|FROM|TO)\s+(.+)",
         text,
         re.IGNORECASE,
     )
@@ -300,13 +288,8 @@ def normalize_gedcom_date(original, formal=None):
             "ABOUT": "ABT",
             "CIRCA": "ABT",
             "CA": "ABT",
-            "HACIA": "ABT",
-            "APROX": "ABT",
-            "APROXIMADAMENTE": "ABT",
             "BEFORE": "BEF",
-            "ANTES DE": "BEF",
             "AFTER": "AFT",
-            "DESPUES DE": "AFT",
         }
 
         prefix = _key(match.group(1))
