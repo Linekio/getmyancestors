@@ -298,6 +298,11 @@ class Gedcom:
                 ordinance.temple_code = self.data
             elif self.tag == "STAT":
                 ordinance.status = ORDINANCES[self.data]
+            elif self.tag == "NOTE":
+                note_text = self.__get_text()
+                prefix = "Unconverted FamilySearch date: "
+                if note_text.startswith(prefix):
+                    ordinance.date_note = note_text[len(prefix):]
             elif self.tag == "FAMC":
                 num = int(self.data[2 : len(self.data) - 1])
                 if num not in self.fam:

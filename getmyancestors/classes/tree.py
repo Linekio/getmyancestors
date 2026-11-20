@@ -1,3 +1,10 @@
+from datetime import date
+
+from getmyancestors.classes.dates import (
+    GEDCOM_MONTHS,
+    normalize_gedcom_date,
+)
+
 import sys
 import re
 import time
@@ -26,7 +33,7 @@ def cont(string):
     res = list()
     max_len = 255
     for line in lines:
-        c_line = line
+        c_line = line.rstrip(" \t")
         to_conc = list()
         while len(c_line.encode("utf-8")) > max_len:
             index = min(max_len, len(c_line) - 2)
@@ -41,7 +48,8 @@ def cont(string):
         to_conc.append(c_line)
         res.append(("\n%s CONC " % level).join(to_conc))
         max_len = 248
-    return ("\n%s CONT " % level).join(res) + "\n"
+    result = ("\n%s CONT " % level).join(res)
+    return "\n".join(line.rstrip(" \t") for line in result.split("\n")) + "\n"
 
 
 class Note:
@@ -108,7 +116,7 @@ class Source:
 
     def print(self, file=sys.stdout):
         """print Source in GEDCOM format"""
-        file.write("0 @S%s@ SOUR \n" % self.num)
+        file.write("0 @S%s@ SOUR\n" % self.num)
         if self.title:
             file.write(cont("1 TITL " + self.title))
         if self.citation:
@@ -130,30 +138,101 @@ class Fact:
     :param tree: a tree object
     """
 
-    def __init__(self, data=None, tree=None):
-        self.value = self.type = self.date = self.place = self.note = self.map = None
+    def __init__(
+        self, data=None, tree=None
+    ):
+        self.value = self.type = (
+            self.date
+        ) = self.place = self.note = (
+            self.map
+        ) = None
+        unparsed_date = None
         if data:
             if "value" in data:
-                self.value = data["value"]
+                self.value = data[
+                    "value"
+                ]
             if "type" in data:
                 self.type = data["type"]
-                if self.type in FACT_EVEN:
-                    self.type = tree.fs._(FACT_EVEN[self.type])
-                elif self.type[:6] == "data:,":
-                    self.type = unquote(self.type[6:])
-                elif self.type not in FACT_TAGS:
+                if (
+                    self.type
+                    in FACT_EVEN
+                ):
+                    self.type = tree.fs._(
+                        FACT_EVEN[
+                            self.type
+                        ]
+                    )
+                elif (
+                    self.type[:6]
+                    == "data:,"
+                ):
+                    self.type = unquote(
+                        self.type[6:]
+                    )
+                elif (
+                    self.type
+                    not in FACT_TAGS
+                ):
                     self.type = None
             if "date" in data:
-                self.date = data["date"]["original"]
+                date_data = (
+                    data["date"] or {}
+                )
+                (
+                    self.date,
+                    unparsed_date,
+                ) = normalize_gedcom_date(
+                    date_data.get(
+                        "original"
+                    ),
+                    date_data.get(
+                        "formal"
+                    ),
+                )
             if "place" in data:
                 place = data["place"]
-                self.place = place["original"]
-                if "description" in place and place["description"][1:] in tree.places:
-                    self.map = tree.places[place["description"][1:]]
-            if "changeMessage" in data["attribution"]:
-                self.note = Note(data["attribution"]["changeMessage"], tree)
-            if self.type == "http://gedcomx.org/Death" and not (
-                self.date or self.place
+                self.place = place[
+                    "original"
+                ]
+                if (
+                    "description"
+                    in place
+                    and place[
+                        "description"
+                    ][1:]
+                    in tree.places
+                ):
+                    self.map = tree.places[
+                        place[
+                            "description"
+                        ][1:]
+                    ]
+            messages = []
+            if unparsed_date:
+                messages.append(
+                    "Unconverted FamilySearch date: "
+                    + unparsed_date
+                )
+            change_message = data.get(
+                "attribution", {}
+            ).get("changeMessage")
+            if change_message:
+                messages.append(
+                    change_message
+                )
+            if messages:
+                self.note = Note(
+                    "\n".join(messages),
+                    tree,
+                )
+            if (
+                self.type
+                == "http://gedcomx.org/Death"
+                and not (
+                    self.date
+                    or self.place
+                )
             ):
                 self.value = "Y"
 
@@ -257,9 +336,12 @@ class Ordinance:
 
     def __init__(self, data=None):
         self.date = self.temple_code = self.status = self.famc = None
+        self.date_note = None
         if data:
             if "completedDate" in data:
-                self.date = data["completedDate"]
+                self.date, self.date_note = normalize_gedcom_date(
+                    data["completedDate"]
+                )
             if "completedTemple" in data:
                 self.temple_code = data["completedTemple"]["code"]
             self.status = data["status"]
@@ -268,6 +350,11 @@ class Ordinance:
         """print Ordinance in Gecom format"""
         if self.date:
             file.write(cont("2 DATE " + self.date))
+        if self.date_note:
+            file.write(cont("2 NOTE Unconverted FamilySearch date: "
+                            + self.date_note
+                    )
+            )
         if self.temple_code:
             file.write("2 TEMP %s\n" % self.temple_code)
         if self.status in ORDINANCES_STATUS:
@@ -851,7 +938,14 @@ class Tree:
         file.write("1 SOUR getmyancestors\n")
         file.write("2 VERS %s\n" % getmyancestors.__version__)
         file.write("2 NAME getmyancestors\n")
-        file.write("1 DATE %s\n" % time.strftime("%d %b %Y"))
+        today = date.today()
+        file.write(
+            "1 DATE {:02d} {} {}\n".format(
+                today.day,
+                GEDCOM_MONTHS[today.month - 1],
+                today.year,
+            )
+        )
         file.write("2 TIME %s\n" % time.strftime("%H:%M:%S"))
         file.write("1 SUBM @SUBM@\n")
         file.write("0 @SUBM@ SUBM\n")
