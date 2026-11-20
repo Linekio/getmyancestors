@@ -133,6 +133,70 @@ def _simple_date(text):
     return None
 
 
+def _formal_simple_date(formal):
+    """Convert a simple GEDCOM X date, including an approximation marker.
+
+    Complex forms (ranges, BCE years, durations and times) must not be
+    treated as exact Gregorian dates.
+    """
+    if not isinstance(formal, str):
+        return None
+
+    match = re.fullmatch(
+        r"(A)?\+(\d{4})(?:-(\d{2})(?:-(\d{2}))?)?",
+        formal,
+    )
+    if not match:
+        return None
+
+    approximate, year, month, day = match.groups()
+    converted = _calendar_date(year, month, day)
+    if converted is None:
+        return None
+
+    return "ABT " + converted if approximate else converted
+
+
+def _formal_fallback(original, text, formal):
+    """Prefer standardized dates without losing the original date phrase.
+
+    Do not reinterpret a conflicting year or an ambiguous numeric date.
+    Unsupported date ranges stay as original text rather than being
+    converted to an incorrectly precise single date.
+    """
+    converted = _formal_simple_date(formal)
+    if converted is None:
+        return _fallback(original, text)
+
+    if re.fullmatch(r"\d{1,2}/\d{1,2}/\d{3,4}", text):
+        return _fallback(original, text)
+
+    # An otherwise recognizable ISO or named-month date failed validation.
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
+        return _fallback(original, text)
+    named_date = re.fullmatch(
+        r"(\d{1,2})\s+(?:de\s+)?([^\d\s]+)\s+(?:de\s+)?(\d{3,4})",
+        text,
+        re.IGNORECASE,
+    )
+    if named_date and MONTH_LOOKUP.get(_key(named_date.group(2))):
+        return _fallback(original, text)
+
+    years = set(re.findall(r"(?<!\d)\d{4}(?!\d)", text))
+    formal_year = re.search(r"\+(\d{4})", formal).group(1)
+    if years and years != {formal_year}:
+        return _fallback(original, text)
+
+    # INT signals that a date was interpreted from its original wording.
+    # The full wording is saved in a separate NOTE when it is too long.
+    if not converted.startswith("ABT "):
+        interpreted = "INT {} ({})".format(converted, text)
+        if len(interpreted) <= 35:
+            return interpreted, None
+
+    return converted, original
+
+
 def _formal_interpretation(original, formal):
     """Use GEDCOM X formal data for ambiguous numeric dates."""
     if not formal:
@@ -190,16 +254,8 @@ def normalize_gedcom_date(original, formal=None):
 
     if not text:
         if formal:
-            match = re.fullmatch(
-                r"\+(\d{4})(?:-(\d{2})(?:-(\d{2}))?)?",
-                formal,
-            )
-            if match:
-                converted = _calendar_date(*match.groups())
-                if converted:
-                    return converted, None
-
-            return None, formal
+            converted = _formal_simple_date(formal)
+            return (converted, None) if converted else (None, formal)
 
         return None, None
 
@@ -270,4 +326,4 @@ def normalize_gedcom_date(original, formal=None):
     if interpreted:
         return interpreted, None
 
-    return _fallback(original, text)
+    return _formal_fallback(original, text, formal)
