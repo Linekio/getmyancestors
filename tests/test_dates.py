@@ -26,27 +26,12 @@ class TestGedcomDates(
                 "16 JUL 1956",
             ),
             (
-                "15 de marzo de 1872",
-                None,
-                "15 MAR 1872",
-            ),
-            (
-                "14 de xuño de 1880",
-                None,
-                "14 JUN 1880",
-            ),
-            (
                 "March 1850",
                 None,
                 "MAR 1850",
             ),
             (
                 "about 1850",
-                None,
-                "ABT 1850",
-            ),
-            (
-                "hacia 1850",
                 None,
                 "ABT 1850",
             ),
@@ -62,11 +47,6 @@ class TestGedcomDates(
             ),
             (
                 "between 1850 and 1860",
-                None,
-                "BET 1850 AND 1860",
-            ),
-            (
-                "entre 1850 y 1860",
                 None,
                 "BET 1850 AND 1860",
             ),
@@ -107,6 +87,36 @@ class TestGedcomDates(
                     ),
                     (expected, None),
                 )
+
+    def test_non_english_dates_without_formal_are_preserved(self):
+        cases = (
+            "15 de marzo de 1872",
+            "14 de xuño de 1880",
+            "hacia 1850",
+            "entre 1850 y 1860",
+            "12 mars 1892",
+            "12 März 1892",
+        )
+        for original in cases:
+            with self.subTest(original=original):
+                self.assertEqual(
+                    normalize_gedcom_date(original),
+                    ("({})".format(original), None),
+                )
+
+    def test_non_english_dates_use_familysearch_formal_values(self):
+        self.assertEqual(
+            normalize_gedcom_date("15 de marzo de 1872", "+1872-03-15"),
+            ("15 MAR 1872", "15 de marzo de 1872"),
+        )
+        self.assertEqual(
+            normalize_gedcom_date("14 de xuño de 1880", "+1880-06-14"),
+            ("14 JUN 1880", "14 de xuño de 1880"),
+        )
+        self.assertEqual(
+            normalize_gedcom_date("hacia 1850", "A+1850"),
+            ("ABT 1850", "hacia 1850"),
+        )
 
     def test_ambiguous_date_without_formal(
         self,
