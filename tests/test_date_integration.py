@@ -127,6 +127,55 @@ class TestDateIntegration(
             imported_fact.note.text,
         )
 
+    def test_blank_note_lines_have_no_trailing_whitespace(self):
+        note = Note(
+            "First line\n\nLast line",
+            num=99,
+        )
+        output = io.StringIO()
+        note.print(output)
+
+        self.assertIn("1 CONT\n", output.getvalue())
+        self.assertNotIn("1 CONT \n", output.getvalue())
+        self.assertEqual(
+            output.getvalue(),
+            "0 @N99@ NOTE First line\n1 CONT\n1 CONT Last line\n",
+        )
+
+    def test_unconverted_ordinance_date_survives_roundtrip(self):
+        original = "During an unknown winter"
+        tree = Tree()
+        tree.display_name = "Test"
+        tree.lang = "English"
+        person = Indi(fid="TEST-123", tree=tree, num=1)
+        person.baptism = Ordinance(
+            {"completedDate": original, "status": "Ready"}
+        )
+        tree.indi[person.fid] = person
+
+        output = io.StringIO()
+        tree.print(output)
+        imported = Gedcom(io.StringIO(output.getvalue()), Tree())
+
+        self.assertIsNone(imported.indi[1].baptism.date)
+        self.assertEqual(
+            imported.indi[1].baptism.date_note,
+            original,
+        )
+
+    def test_complete_gedcom_has_no_trailing_whitespace(self):
+        tree = Tree()
+        tree.display_name = "Test"
+        tree.lang = "English"
+        person = Indi(fid="TEST-123", tree=tree, num=1)
+        person.notes.add(Note("First line\n\nLast line", tree=tree))
+        tree.indi[person.fid] = person
+
+        output = io.StringIO()
+        tree.print(output)
+        for line in output.getvalue().splitlines():
+            self.assertEqual(line, line.rstrip(" \t"))
+
     def test_multiline_note_has_no_trailing_spaces(
         self,
     ):
