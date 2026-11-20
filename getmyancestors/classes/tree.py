@@ -48,7 +48,8 @@ def cont(string):
         to_conc.append(c_line)
         res.append(("\n%s CONC " % level).join(to_conc))
         max_len = 248
-    return ("\n%s CONT " % level).join(res) + "\n"
+    result = ("\n%s CONT " % level).join(res)
+    return "\n".join(line.rstrip(" \t") for line in result.split("\n")) + "\n"
 
 
 class Note:
@@ -944,7 +945,7 @@ class Tree:
                 GEDCOM_MONTHS[today.month - 1],
                 today.year,
             )
-)
+        )
         file.write("2 TIME %s\n" % time.strftime("%H:%M:%S"))
         file.write("1 SUBM @SUBM@\n")
         file.write("0 @SUBM@ SUBM\n")
