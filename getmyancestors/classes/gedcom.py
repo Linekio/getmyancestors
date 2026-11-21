@@ -94,7 +94,7 @@ class Gedcom:
                 self.__get_name()
             elif self.tag == "SEX":
                 self.indi[self.num].gender = self.data
-            elif self.tag in FACT_TYPES or self.tag == "EVEN":
+            elif self.tag in FACT_TYPES or self.tag in ("EVEN", "FACT"):
                 self.indi[self.num].facts.add(self.__get_fact())
             elif self.tag == "BAPL":
                 self.indi[self.num].baptism = self.__get_ordinance()
@@ -132,7 +132,7 @@ class Gedcom:
                 self.fam[self.num].wife_num = int(self.data[2 : len(self.data) - 1])
             elif self.tag == "CHIL":
                 self.fam[self.num].chil_num.add(int(self.data[2 : len(self.data) - 1]))
-            elif self.tag in FACT_TYPES:
+            elif self.tag in FACT_TYPES or self.tag in ("EVEN", "FACT"):
                 self.fam[self.num].facts.add(self.__get_fact())
             elif self.tag == "SLGS":
                 self.fam[self.num].sealing_spouse = self.__get_ordinance()
@@ -184,32 +184,64 @@ class Gedcom:
         self.flag = True
 
     def __get_fact(self):
-        """Parse a fact"""
+        """Parse a GEDCOM fact or event"""
         fact = Fact()
-        if self.tag != "EVEN":
-            fact.type = FACT_TYPES[self.tag]
-            fact.value = self.data
+        original_tag = self.tag
+        inline_notes = []
+
+        if original_tag == "FACT":
+            fact.custom = True
+            fact.value = self.data or None
+        elif original_tag == "EVEN":
+            fact.value = self.data or None
+        else:
+            fact.type = FACT_TYPES[original_tag]
+            fact.value = self.data or None
+
         while self.__get_line() and self.level > 1:
             if self.tag == "TYPE":
-                fact.type = self.data
-            if self.tag == "DATE":
+                fact.type = self.__get_text()
+
+            elif self.tag == "DATE":
                 fact.date = self.__get_text()
+
             elif self.tag == "PLAC":
                 fact.place = self.__get_text()
+
             elif self.tag == "MAP":
                 fact.map = self.__get_map()
+
             elif self.tag == "NOTE":
-                if self.data[:12] == "Description:":
-                    fact.value = self.data[13:]
-                    continue
-                num = int(self.data[2 : len(self.data) - 1])
-                if num not in self.note:
-                    self.note[num] = Note(tree=self.tree, num=num)
-                fact.note = self.note[num]
+                if (
+                    self.data.startswith("@N")
+                    and self.data.endswith("@")
+                    and self.data[2:-1].isdigit()
+                ):
+                    num = int(self.data[2:-1])
+                    if num not in self.note:
+                        self.note[num] = Note(tree=self.tree, num=num)
+                    fact.note = self.note[num]
+                else:
+                    inline_notes.append(self.__get_text())
+
             elif self.tag == "CONT":
-                fact.value += "\n" + self.data
+                fact.value = (fact.value or "") + "\n" + self.data
+
             elif self.tag == "CONC":
-                fact.value += self.data
+                fact.value = (fact.value or "") + self.data
+
+        for text in inline_notes:
+            is_description = text.startswith("Description: ") and (
+                original_tag == "EVEN"
+                or fact.custom
+                or fact.type == "http://gedcomx.org/Marriage"
+            )
+
+            if is_description:
+                fact.value = text[len("Description: "):]
+            else:
+                fact.note = Note(text, self.tree)
+
         self.flag = True
         return fact
 

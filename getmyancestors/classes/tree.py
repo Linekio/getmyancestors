@@ -132,6 +132,7 @@ class Fact:
 
     def __init__(self, data=None, tree=None):
         self.value = self.type = self.date = self.place = self.note = self.map = None
+        self.custom = False
         if data:
             if "value" in data:
                 self.value = data["value"]
@@ -139,7 +140,8 @@ class Fact:
                 self.type = data["type"]
                 if self.type in FACT_EVEN:
                     self.type = tree.fs._(FACT_EVEN[self.type])
-                elif self.type[:6] == "data:,":
+                elif self.type.startswith("data:,"):
+                    self.custom = True
                     self.type = unquote(self.type[6:])
                 elif self.type not in FACT_TAGS:
                     self.type = None
@@ -157,28 +159,48 @@ class Fact:
             ):
                 self.value = "Y"
 
-    def print(self, file=sys.stdout):
-        """print Fact in GEDCOM format
-        the GEDCOM TAG depends on the type, defined in FACT_TAGS
-        """
+    def print(self, file=sys.stdout, family=False):
+        """Print a fact or event in GEDCOM format."""
         if self.type in FACT_TAGS:
             tmp = "1 " + FACT_TAGS[self.type]
-            if self.value:
+
+            if self.value and (
+                self.type != "http://gedcomx.org/Marriage" or self.value == "Y"
+            ):
                 tmp += " " + self.value
+
             file.write(cont(tmp))
+
         elif self.type:
-            file.write("1 EVEN\n2 TYPE %s\n" % self.type)
-            if self.value:
+            if self.custom and self.value and not family:
+                file.write(cont("1 FACT " + self.value))
+            else:
+                file.write("1 EVEN\n")
+
+            file.write(cont("2 TYPE " + self.type))
+
+            if self.value and (not self.custom or family):
                 file.write(cont("2 NOTE Description: " + self.value))
         else:
             return
+
         if self.date:
             file.write(cont("2 DATE " + self.date))
+
         if self.place:
             file.write(cont("2 PLAC " + self.place))
+
         if self.map:
             latitude, longitude = self.map
             file.write("3 MAP\n4 LATI %s\n4 LONG %s\n" % (latitude, longitude))
+
+        if (
+            self.type == "http://gedcomx.org/Marriage"
+            and self.value
+            and self.value != "Y"
+        ):
+            file.write(cont("2 NOTE Description: " + self.value))
+
         if self.note:
             self.note.link(file, 2)
 
@@ -614,7 +636,7 @@ class Fam:
         for num in self.chil_num:
             file.write("1 CHIL @I%s@\n" % num)
         for o in self.facts:
-            o.print(file)
+            o.print(file, family=True)
         if self.sealing_spouse:
             file.write("1 SLGS\n")
             self.sealing_spouse.print(file)
