@@ -32,10 +32,7 @@ def cont(string):
             index = min(max_len, len(c_line) - 2)
             while (
                 len(c_line[:index].encode("utf-8")) > max_len
-                or re.search(
-                    r"[ \t\v]",
-                    c_line[index - 1 : index + 1],
-                )
+                or re.search(r"[ \t\v]", c_line[index - 1 : index + 1])
             ) and index > 1:
                 index -= 1
             to_conc.append(c_line[:index])
@@ -56,12 +53,7 @@ class Note:
 
     _counter = itertools.count(1)
 
-    def __init__(
-        self,
-        text="",
-        tree=None,
-        num=None,
-    ):
+    def __init__(self, text="", tree=None, num=None):
         if num:
             self.num = num
         else:
@@ -89,12 +81,7 @@ class Source:
 
     _counter = itertools.count(1)
 
-    def __init__(
-        self,
-        data=None,
-        tree=None,
-        num=None,
-    ):
+    def __init__(self, data=None, tree=None, num=None):
         if num:
             self.num = num
         else:
@@ -117,12 +104,7 @@ class Source:
             if "notes" in data:
                 for n in data["notes"]:
                     if n["text"]:
-                        self.notes.add(
-                            Note(
-                                n["text"],
-                                self.tree,
-                            )
-                        )
+                        self.notes.add(Note(n["text"], self.tree))
 
     def print(self, file=sys.stdout):
         """print Source in GEDCOM format"""
@@ -171,17 +153,14 @@ class Fact:
                 if "description" in place and place["description"][1:] in tree.places:
                     self.map = tree.places[place["description"][1:]]
             if "changeMessage" in data["attribution"]:
-                self.note = Note(
-                    data["attribution"]["changeMessage"],
-                    tree,
-                )
+                self.note = Note(data["attribution"]["changeMessage"], tree)
             if self.type == "http://gedcomx.org/Death" and not (
                 self.date or self.place
             ):
                 self.value = "Y"
 
-    def print(self, file=sys.stdout):
-        """Print a fact in GEDCOM format"""
+    def print(self, file=sys.stdout, family=False):
+        """Print a fact or event in GEDCOM format."""
         if self.type in FACT_TAGS:
             tmp = "1 " + FACT_TAGS[self.type]
 
@@ -193,14 +172,14 @@ class Fact:
             file.write(cont(tmp))
 
         elif self.type:
-            if self.custom and self.value:
+            if self.custom and self.value and not family:
                 file.write(cont("1 FACT " + self.value))
             else:
                 file.write("1 EVEN\n")
 
             file.write(cont("2 TYPE " + self.type))
 
-            if self.value and not self.custom:
+            if self.value and (not self.custom or family):
                 file.write(cont("2 NOTE Description: " + self.value))
         else:
             return
@@ -220,7 +199,7 @@ class Fact:
             and self.value
             and self.value != "Y"
         ):
-            file.write(cont("2 NOTE " + self.value))
+            file.write(cont("2 NOTE Description: " + self.value))
 
         if self.note:
             self.note.link(file, 2)
@@ -275,19 +254,13 @@ class Name:
                     if z["type"] == "http://gedcomx.org/Suffix":
                         self.suffix = z["value"]
             if "changeMessage" in data["attribution"]:
-                self.note = Note(
-                    data["attribution"]["changeMessage"],
-                    tree,
-                )
+                self.note = Note(data["attribution"]["changeMessage"], tree)
 
     def print(self, file=sys.stdout, typ=None):
         """print Name in GEDCOM format
         :param typ: type for additional names
         """
-        tmp = "1 NAME %s /%s/" % (
-            self.given,
-            self.surname,
-        )
+        tmp = "1 NAME %s /%s/" % (self.given, self.surname)
         if self.suffix:
             tmp += " " + self.suffix
         file.write(cont(tmp))
@@ -334,12 +307,7 @@ class Indi:
 
     _counter = itertools.count(1)
 
-    def __init__(
-        self,
-        fid=None,
-        tree=None,
-        num=None,
-    ):
+    def __init__(self, fid=None, tree=None, num=None):
         if num:
             self.num = num
         else:
@@ -376,33 +344,13 @@ class Indi:
                     self.name = Name(x, self.tree)
                 else:
                     if x["type"] == "http://gedcomx.org/Nickname":
-                        self.nicknames.add(
-                            Name(
-                                x,
-                                self.tree,
-                            )
-                        )
+                        self.nicknames.add(Name(x, self.tree))
                     if x["type"] == "http://gedcomx.org/BirthName":
-                        self.birthnames.add(
-                            Name(
-                                x,
-                                self.tree,
-                            )
-                        )
+                        self.birthnames.add(Name(x, self.tree))
                     if x["type"] == "http://gedcomx.org/AlsoKnownAs":
-                        self.aka.add(
-                            Name(
-                                x,
-                                self.tree,
-                            )
-                        )
+                        self.aka.add(Name(x, self.tree))
                     if x["type"] == "http://gedcomx.org/MarriedName":
-                        self.married.add(
-                            Name(
-                                x,
-                                self.tree,
-                            )
-                        )
+                        self.married.add(Name(x, self.tree))
             if "gender" in data:
                 if data["gender"]["type"] == "http://gedcomx.org/Male":
                     self.gender = "M"
@@ -416,23 +364,12 @@ class Indi:
                         self.notes.add(
                             Note(
                                 "=== %s ===\n%s"
-                                % (
-                                    self.tree.fs._("Life Sketch"),
-                                    x.get(
-                                        "value",
-                                        "",
-                                    ),
-                                ),
+                                % (self.tree.fs._("Life Sketch"), x.get("value", "")),
                                 self.tree,
                             )
                         )
                     else:
-                        self.facts.add(
-                            Fact(
-                                x,
-                                self.tree,
-                            )
-                        )
+                        self.facts.add(Fact(x, self.tree))
             if "sources" in data and not self.tree.no_sources:
                 sources = self.tree.fs.get_url(
                     "/platform/tree/persons/%s/sources" % self.fid
@@ -447,15 +384,9 @@ class Indi:
                         )
                     for source in sources["sourceDescriptions"]:
                         if source["id"] not in self.tree.sources:
-                            self.tree.sources[source["id"]] = Source(
-                                source,
-                                self.tree,
-                            )
+                            self.tree.sources[source["id"]] = Source(source, self.tree)
                         self.sources.add(
-                            (
-                                self.tree.sources[source["id"]],
-                                quotes[source["id"]],
-                            )
+                            (self.tree.sources[source["id"]], quotes[source["id"]])
                         )
             if self.tree.no_memories:
                 return
@@ -467,25 +398,11 @@ class Indi:
                     for x in memorie["sourceDescriptions"]:
                         if x["mediaType"] == "text/plain":
                             text = "\n".join(
-                                val.get(
-                                    "value",
-                                    "",
-                                )
-                                for val in x.get(
-                                    "titles",
-                                    [],
-                                )
-                                + x.get(
-                                    "descriptions",
-                                    [],
-                                )
+                                val.get("value", "")
+                                for val in x.get("titles", [])
+                                + x.get("descriptions", [])
                             )
-                            self.notes.add(
-                                Note(
-                                    text,
-                                    self.tree,
-                                )
-                            )
+                            self.notes.add(Note(text, self.tree))
                         else:
                             self.memories.add(Memorie(x))
 
@@ -504,12 +421,7 @@ class Indi:
             for n in notes["persons"][0]["notes"]:
                 text_note = "=== %s ===\n" % n["subject"] if "subject" in n else ""
                 text_note += n["text"] + "\n" if "text" in n else ""
-                self.notes.add(
-                    Note(
-                        text_note,
-                        self.tree,
-                    )
-                )
+                self.notes.add(Note(text_note, self.tree))
 
     def get_ordinances(self):
         """retrieve LDS ordinances
@@ -534,17 +446,11 @@ class Indi:
                 elif key == "sealingsToParents":
                     for subo in o:
                         self.sealing_child = Ordinance(subo)
-                        relationships = subo.get(
-                            "relationships",
-                            {},
-                        )
+                        relationships = subo.get("relationships", {})
                         father = relationships.get("parent1Id")
                         mother = relationships.get("parent2Id")
                         if father and mother:
-                            famc = (
-                                father,
-                                mother,
-                            )
+                            famc = father, mother
                 elif key == "sealingsToSpouses":
                     res += o
         return res, famc
@@ -553,10 +459,7 @@ class Indi:
         """retrieve contributors"""
         temp = set()
         url = "/platform/tree/persons/%s/changes" % self.fid
-        data = self.tree.fs.get_url(
-            url,
-            {"Accept": "application/x-gedcomx-atom+json"},
-        )
+        data = self.tree.fs.get_url(url, {"Accept": "application/x-gedcomx-atom+json"})
         if data:
             for entries in data["entries"]:
                 for contributors in entries["contributors"]:
@@ -578,15 +481,7 @@ class Indi:
         if self.name:
             self.name.print(file)
         for o in self.nicknames:
-            file.write(
-                cont(
-                    "2 NICK %s %s"
-                    % (
-                        o.given,
-                        o.surname,
-                    )
-                )
-            )
+            file.write(cont("2 NICK %s %s" % (o.given, o.surname)))
         for o in self.birthnames:
             o.print(file)
         for o in self.aka:
@@ -621,10 +516,7 @@ class Indi:
         file.write("1 _FSFTID %s\n" % self.fid)
         for o in self.notes:
             o.link(file)
-        for (
-            source,
-            quote,
-        ) in self.sources:
+        for source, quote in self.sources:
             source.link(file, 1)
             if quote:
                 file.write(cont("2 PAGE " + quote))
@@ -640,13 +532,7 @@ class Fam:
 
     _counter = itertools.count(1)
 
-    def __init__(
-        self,
-        husb=None,
-        wife=None,
-        tree=None,
-        num=None,
-    ):
+    def __init__(self, husb=None, wife=None, tree=None, num=None):
         if num:
             self.num = num
         else:
@@ -678,12 +564,7 @@ class Fam:
             if data:
                 if "facts" in data["relationships"][0]:
                     for x in data["relationships"][0]["facts"]:
-                        self.facts.add(
-                            Fact(
-                                x,
-                                self.tree,
-                            )
-                        )
+                        self.facts.add(Fact(x, self.tree))
                 if "sources" in data["relationships"][0]:
                     quotes = dict()
                     for x in data["relationships"][0]["sources"]:
@@ -703,15 +584,11 @@ class Fam:
                                 and source["id"] not in self.tree.sources
                             ):
                                 self.tree.sources[source["id"]] = Source(
-                                    source,
-                                    self.tree,
+                                    source, self.tree
                                 )
                     for source_fid in quotes:
                         self.sources.add(
-                            (
-                                self.tree.sources[source_fid],
-                                quotes[source_fid],
-                            )
+                            (self.tree.sources[source_fid], quotes[source_fid])
                         )
 
     def get_notes(self):
@@ -724,12 +601,7 @@ class Fam:
                 for n in notes["relationships"][0]["notes"]:
                     text_note = "=== %s ===\n" % n["subject"] if "subject" in n else ""
                     text_note += n["text"] + "\n" if "text" in n else ""
-                    self.notes.add(
-                        Note(
-                            text_note,
-                            self.tree,
-                        )
-                    )
+                    self.notes.add(Note(text_note, self.tree))
 
     def get_contributors(self):
         """retrieve contributors"""
@@ -737,8 +609,7 @@ class Fam:
             temp = set()
             url = "/platform/tree/couple-relationships/%s/changes" % self.fid
             data = self.tree.fs.get_url(
-                url,
-                {"Accept": "application/x-gedcomx-atom+json"},
+                url, {"Accept": "application/x-gedcomx-atom+json"}
             )
             if data:
                 for entries in data["entries"]:
@@ -765,7 +636,7 @@ class Fam:
         for num in self.chil_num:
             file.write("1 CHIL @I%s@\n" % num)
         for o in self.facts:
-            o.print(file)
+            o.print(file, family=True)
         if self.sealing_spouse:
             file.write("1 SLGS\n")
             self.sealing_spouse.print(file)
@@ -773,10 +644,7 @@ class Fam:
             file.write("1 _FSFTID %s\n" % self.fid)
         for o in self.notes:
             o.link(file)
-        for (
-            source,
-            quote,
-        ) in self.sources:
+        for source, quote in self.sources:
             source.link(file, 1)
             if quote:
                 file.write(cont("2 PAGE " + quote))
@@ -787,12 +655,7 @@ class Tree:
     :param fs: a Session object
     """
 
-    def __init__(
-        self,
-        fs=None,
-        no_sources=False,
-        no_memories=False,
-    ):
+    def __init__(self, fs=None, no_sources=False, no_memories=False):
         self.fs = fs
         self.no_sources = no_sources
         self.no_memories = no_memories
@@ -816,11 +679,7 @@ class Tree:
             for person in data["persons"]:
                 self.indi[person["id"]] = Indi(person["id"], self)
                 futures.add(
-                    loop.run_in_executor(
-                        None,
-                        self.indi[person["id"]].add_data,
-                        person,
-                    )
+                    loop.run_in_executor(None, self.indi[person["id"]].add_data, person)
                 )
             for future in futures:
                 await future
@@ -851,28 +710,11 @@ class Tree:
                         )
                         child = rel["child"]["resourceId"] if "child" in rel else None
                         if child in self.indi:
-                            self.indi[child].parents.add(
-                                (
-                                    father,
-                                    mother,
-                                )
-                            )
+                            self.indi[child].parents.add((father, mother))
                         if father in self.indi:
-                            self.indi[father].children.add(
-                                (
-                                    father,
-                                    mother,
-                                    child,
-                                )
-                            )
+                            self.indi[father].children.add((father, mother, child))
                         if mother in self.indi:
-                            self.indi[mother].children.add(
-                                (
-                                    father,
-                                    mother,
-                                    child,
-                                )
-                            )
+                            self.indi[mother].children.add((father, mother, child))
                 if "relationships" in data:
                     for rel in data["relationships"]:
                         if rel["type"] == "http://gedcomx.org/Couple":
@@ -881,19 +723,11 @@ class Tree:
                             relfid = rel["id"]
                             if person1 in self.indi:
                                 self.indi[person1].spouses.add(
-                                    (
-                                        person1,
-                                        person2,
-                                        relfid,
-                                    )
+                                    (person1, person2, relfid)
                                 )
                             if person2 in self.indi:
                                 self.indi[person2].spouses.add(
-                                    (
-                                        person1,
-                                        person2,
-                                        relfid,
-                                    )
+                                    (person1, person2, relfid)
                                 )
             new_fids = new_fids[MAX_PERSONS:]
 
@@ -902,10 +736,7 @@ class Tree:
         :param father: the father fid or None
         :param mother: the mother fid or None
         """
-        if (
-            father,
-            mother,
-        ) not in self.fam:
+        if (father, mother) not in self.fam:
             self.fam[(father, mother)] = Fam(father, mother, self)
 
     def add_trio(self, father, mother, child):
@@ -934,10 +765,7 @@ class Tree:
         if parents:
             self.add_indis(parents)
         for fid in fids & self.indi.keys():
-            for (
-                father,
-                mother,
-            ) in self.indi[fid].parents:
+            for father, mother in self.indi[fid].parents:
                 if (
                     mother in self.indi
                     and father in self.indi
@@ -946,11 +774,7 @@ class Tree:
                     or not mother
                     and father in self.indi
                 ):
-                    self.add_trio(
-                        father,
-                        mother,
-                        fid,
-                    )
+                    self.add_trio(father, mother, fid)
         return set(filter(None, parents))
 
     def add_spouses(self, fids):
@@ -960,25 +784,11 @@ class Tree:
 
         async def add(loop, rels):
             futures = set()
-            for (
-                father,
-                mother,
-                relfid,
-            ) in rels:
-                if (
-                    father,
-                    mother,
-                ) in self.fam:
+            for father, mother, relfid in rels:
+                if (father, mother) in self.fam:
                     futures.add(
                         loop.run_in_executor(
-                            None,
-                            self.fam[
-                                (
-                                    father,
-                                    mother,
-                                )
-                            ].add_marriage,
-                            relfid,
+                            None, self.fam[(father, mother)].add_marriage, relfid
                         )
                     )
             for future in futures:
@@ -992,11 +802,7 @@ class Tree:
             self.add_indis(
                 set.union(*({father, mother} for father, mother, relfid in rels))
             )
-            for (
-                father,
-                mother,
-                _,
-            ) in rels:
+            for father, mother, _ in rels:
                 if father in self.indi and mother in self.indi:
                     self.indi[father].add_fams((father, mother))
                     self.indi[mother].add_fams((father, mother))
@@ -1013,11 +819,7 @@ class Tree:
         children = set()
         if rels:
             self.add_indis(set.union(*(set(rel) for rel in rels)))
-            for (
-                father,
-                mother,
-                child,
-            ) in rels:
+            for father, mother, child in rels:
                 if child in self.indi and (
                     mother in self.indi
                     and father in self.indi
@@ -1026,11 +828,7 @@ class Tree:
                     or not mother
                     and father in self.indi
                 ):
-                    self.add_trio(
-                        father,
-                        mother,
-                        child,
-                    )
+                    self.add_trio(father, mother, child)
                     children.add(child)
         return children
 
@@ -1044,15 +842,9 @@ class Tree:
                 self.indi[fid].sealing_child.famc = self.fam[famc]
             for o in ret:
                 spouse_id = o["relationships"]["spouseId"]
-                if (
-                    fid,
-                    spouse_id,
-                ) in self.fam:
+                if (fid, spouse_id) in self.fam:
                     self.fam[fid, spouse_id].sealing_spouse = Ordinance(o)
-                elif (
-                    spouse_id,
-                    fid,
-                ) in self.fam:
+                elif (spouse_id, fid) in self.fam:
                     self.fam[spouse_id, fid].sealing_spouse = Ordinance(o)
 
     def reset_num(self):
@@ -1088,26 +880,14 @@ class Tree:
         file.write("1 NAME %s\n" % self.display_name)
         file.write("1 LANG %s\n" % self.lang)
 
-        for fid in sorted(
-            self.indi,
-            key=lambda x: self.indi.__getitem__(x).num,
-        ):
+        for fid in sorted(self.indi, key=lambda x: self.indi.__getitem__(x).num):
             self.indi[fid].print(file)
-        for husb, wife in sorted(
-            self.fam,
-            key=lambda x: self.fam.__getitem__(x).num,
-        ):
+        for husb, wife in sorted(self.fam, key=lambda x: self.fam.__getitem__(x).num):
             self.fam[(husb, wife)].print(file)
-        sources = sorted(
-            self.sources.values(),
-            key=lambda x: x.num,
-        )
+        sources = sorted(self.sources.values(), key=lambda x: x.num)
         for s in sources:
             s.print(file)
-        notes = sorted(
-            self.notes,
-            key=lambda x: x.num,
-        )
+        notes = sorted(self.notes, key=lambda x: x.num)
         for i, n in enumerate(notes):
             if i > 0:
                 if n.num == notes[i - 1].num:

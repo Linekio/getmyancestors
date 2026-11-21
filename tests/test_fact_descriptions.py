@@ -55,7 +55,9 @@ class TestFactDescriptions(unittest.TestCase):
 
         self.assertEqual(
             self.export_fact(fact),
-            "1 MARR\n" "2 DATE 12 MAR 1900\n" "2 NOTE Married at the family home\n",
+            "1 MARR\n"
+            "2 DATE 12 MAR 1900\n"
+            "2 NOTE Description: Married at the family home\n",
         )
 
     def test_marriage_without_description(self):
@@ -108,7 +110,7 @@ class TestFactDescriptions(unittest.TestCase):
             "0 @F1@ FAM\n"
             "1 MARR\n"
             "2 DATE 12 MAR 1900\n"
-            "2 NOTE Married at the family home\n"
+            "2 NOTE Description: Married at the family home\n"
             "0 TRLR\n"
         )
 
@@ -125,7 +127,7 @@ class TestFactDescriptions(unittest.TestCase):
         )
 
         self.assertIn(
-            "2 NOTE Married at the family home\n",
+            "2 NOTE Description: Married at the family home\n",
             self.export_fact(fact),
         )
 
@@ -138,7 +140,8 @@ class TestFactDescriptions(unittest.TestCase):
         exported = self.export_fact(fact)
 
         self.assertIn(
-            "2 NOTE Married in a chapel\n" "3 CONT Witnesses attended\n",
+            "2 NOTE Description: Married in a chapel\n"
+            "3 CONT Witnesses attended\n",
             exported,
         )
 
@@ -152,6 +155,106 @@ class TestFactDescriptions(unittest.TestCase):
         self.assertEqual(
             imported_fact.value,
             "Married in a chapel\nWitnesses attended",
+        )
+
+    def test_regular_inline_note_is_preserved(self):
+        data = (
+            "0 @I1@ INDI\n"
+            "1 BIRT\n"
+            "2 NOTE Place documented in parish records\n"
+            "0 TRLR\n"
+        )
+
+        imported = Gedcom(io.StringIO(data), Tree())
+        fact = next(iter(imported.indi[1].facts))
+
+        self.assertIsNone(fact.value)
+        self.assertIsNotNone(fact.note)
+        self.assertEqual(
+            fact.note.text,
+            "Place documented in parish records",
+        )
+
+    def test_regular_description_prefixed_note_is_preserved(self):
+        data = (
+            "0 @I1@ INDI\n"
+            "1 BIRT\n"
+            "2 NOTE Description: Original wording from the record\n"
+            "0 TRLR\n"
+        )
+
+        imported = Gedcom(io.StringIO(data), Tree())
+        fact = next(iter(imported.indi[1].facts))
+
+        self.assertIsNone(fact.value)
+        self.assertEqual(
+            fact.note.text,
+            "Description: Original wording from the record",
+        )
+
+    def test_marriage_note_is_not_assumed_to_be_a_description(self):
+        data = (
+            "0 @F1@ FAM\n"
+            "1 MARR\n"
+            "2 NOTE Witness details require verification\n"
+            "0 TRLR\n"
+        )
+
+        imported = Gedcom(io.StringIO(data), Tree())
+        fact = next(iter(imported.fam[1].facts))
+
+        self.assertIsNone(fact.value)
+        self.assertEqual(
+            fact.note.text,
+            "Witness details require verification",
+        )
+
+    def test_legacy_event_description_is_preserved(self):
+        data = (
+            "0 @I1@ INDI\n"
+            "1 EVEN\n"
+            "2 TYPE Military Award\n"
+            "2 NOTE Description: Awarded for volunteer service\n"
+            "0 TRLR\n"
+        )
+
+        imported = Gedcom(io.StringIO(data), Tree())
+        fact = next(iter(imported.indi[1].facts))
+
+        self.assertEqual(fact.type, "Military Award")
+        self.assertEqual(
+            fact.value,
+            "Awarded for volunteer service",
+        )
+
+    def test_family_custom_fact_uses_event(self):
+        fact = self.make_fact(
+            "data:,Military%20Award",
+            "Awarded for volunteer service",
+        )
+
+        family = Fam(tree=Tree(), num=1)
+        family.facts.add(fact)
+
+        output = io.StringIO()
+        family.print(output)
+
+        self.assertIn(
+            "1 EVEN\n"
+            "2 TYPE Military Award\n"
+            "2 NOTE Description: Awarded for volunteer service\n",
+            output.getvalue(),
+        )
+
+        imported = Gedcom(
+            io.StringIO(output.getvalue() + "0 TRLR\n"),
+            Tree(),
+        )
+        imported_fact = next(iter(imported.fam[1].facts))
+
+        self.assertEqual(
+            imported_fact.value,
+            "Awarded for volunteer service",
         )
 
 

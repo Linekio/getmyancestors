@@ -9,10 +9,7 @@ from getmyancestors.classes.tree import (
     Ordinance,
     Source,
 )
-from getmyancestors.classes.constants import (
-    FACT_TYPES,
-    ORDINANCES,
-)
+from getmyancestors.classes.constants import FACT_TYPES, ORDINANCES
 
 
 class Gedcom:
@@ -39,26 +36,17 @@ class Gedcom:
         while self.__get_line():
             if self.tag == "INDI":
                 self.num = int(self.pointer[2 : len(self.pointer) - 1])
-                self.indi[self.num] = Indi(
-                    tree=self.tree,
-                    num=self.num,
-                )
+                self.indi[self.num] = Indi(tree=self.tree, num=self.num)
                 self.__get_indi()
             elif self.tag == "FAM":
                 self.num = int(self.pointer[2 : len(self.pointer) - 1])
                 if self.num not in self.fam:
-                    self.fam[self.num] = Fam(
-                        tree=self.tree,
-                        num=self.num,
-                    )
+                    self.fam[self.num] = Fam(tree=self.tree, num=self.num)
                 self.__get_fam()
             elif self.tag == "NOTE":
                 self.num = int(self.pointer[2 : len(self.pointer) - 1])
                 if self.num not in self.note:
-                    self.note[self.num] = Note(
-                        tree=self.tree,
-                        num=self.num,
-                    )
+                    self.note[self.num] = Note(tree=self.tree, num=self.num)
                 self.__get_note()
             elif self.tag == "SOUR" and self.pointer:
                 self.num = int(self.pointer[2 : len(self.pointer) - 1])
@@ -127,10 +115,7 @@ class Gedcom:
             elif self.tag == "NOTE":
                 num = int(self.data[2 : len(self.data) - 1])
                 if num not in self.note:
-                    self.note[num] = Note(
-                        tree=self.tree,
-                        num=num,
-                    )
+                    self.note[num] = Note(tree=self.tree, num=num)
                 self.indi[self.num].notes.add(self.note[num])
             elif self.tag == "SOUR":
                 self.indi[self.num].sources.add(self.__get_link_source())
@@ -147,7 +132,7 @@ class Gedcom:
                 self.fam[self.num].wife_num = int(self.data[2 : len(self.data) - 1])
             elif self.tag == "CHIL":
                 self.fam[self.num].chil_num.add(int(self.data[2 : len(self.data) - 1]))
-            elif self.tag in FACT_TYPES:
+            elif self.tag in FACT_TYPES or self.tag in ("EVEN", "FACT"):
                 self.fam[self.num].facts.add(self.__get_fact())
             elif self.tag == "SLGS":
                 self.fam[self.num].sealing_spouse = self.__get_ordinance()
@@ -156,10 +141,7 @@ class Gedcom:
             elif self.tag == "NOTE":
                 num = int(self.data[2 : len(self.data) - 1])
                 if num not in self.note:
-                    self.note[num] = Note(
-                        tree=self.tree,
-                        num=num,
-                    )
+                    self.note[num] = Note(tree=self.tree, num=num)
                 self.fam[self.num].notes.add(self.note[num])
             elif self.tag == "SOUR":
                 self.fam[self.num].sources.add(self.__get_link_source())
@@ -195,10 +177,7 @@ class Gedcom:
             elif self.tag == "NOTE":
                 num = int(self.data[2 : len(self.data) - 1])
                 if num not in self.note:
-                    self.note[num] = Note(
-                        tree=self.tree,
-                        num=num,
-                    )
+                    self.note[num] = Note(tree=self.tree, num=num)
                 name.note = self.note[num]
         if not added:
             self.indi[self.num].birthnames.add(name)
@@ -207,14 +186,16 @@ class Gedcom:
     def __get_fact(self):
         """Parse a GEDCOM fact or event"""
         fact = Fact()
+        original_tag = self.tag
+        inline_notes = []
 
-        if self.tag == "FACT":
+        if original_tag == "FACT":
             fact.custom = True
             fact.value = self.data or None
-        elif self.tag == "EVEN":
+        elif original_tag == "EVEN":
             fact.value = self.data or None
         else:
-            fact.type = FACT_TYPES[self.tag]
+            fact.type = FACT_TYPES[original_tag]
             fact.value = self.data or None
 
         while self.__get_line() and self.level > 1:
@@ -237,27 +218,29 @@ class Gedcom:
                     and self.data[2:-1].isdigit()
                 ):
                     num = int(self.data[2:-1])
-
                     if num not in self.note:
-                        self.note[num] = Note(
-                            tree=self.tree,
-                            num=num,
-                        )
-
+                        self.note[num] = Note(tree=self.tree, num=num)
                     fact.note = self.note[num]
                 else:
-                    text = self.__get_text()
-
-                    if text.startswith("Description: "):
-                        fact.value = text[len("Description: ") :]
-                    else:
-                        fact.value = text
+                    inline_notes.append(self.__get_text())
 
             elif self.tag == "CONT":
                 fact.value = (fact.value or "") + "\n" + self.data
 
             elif self.tag == "CONC":
                 fact.value = (fact.value or "") + self.data
+
+        for text in inline_notes:
+            is_description = text.startswith("Description: ") and (
+                original_tag == "EVEN"
+                or fact.custom
+                or fact.type == "http://gedcomx.org/Marriage"
+            )
+
+            if is_description:
+                fact.value = text[len("Description: "):]
+            else:
+                fact.note = Note(text, self.tree)
 
         self.flag = True
         return fact
@@ -305,10 +288,7 @@ class Gedcom:
             elif self.tag == "NOTE":
                 num = int(self.data[2 : len(self.data) - 1])
                 if num not in self.note:
-                    self.note[num] = Note(
-                        tree=self.tree,
-                        num=num,
-                    )
+                    self.note[num] = Note(tree=self.tree, num=num)
                 self.sour[self.num].notes.add(self.note[num])
         self.flag = True
 
@@ -353,10 +333,7 @@ class Gedcom:
             elif self.tag == "FAMC":
                 num = int(self.data[2 : len(self.data) - 1])
                 if num not in self.fam:
-                    self.fam[num] = Fam(
-                        tree=self.tree,
-                        num=num,
-                    )
+                    self.fam[num] = Fam(tree=self.tree, num=num)
                 ordinance.famc = self.fam[num]
         self.flag = True
         return ordinance
@@ -373,15 +350,9 @@ class Gedcom:
         for num in self.indi:
             for famc in self.indi[num].famc_num:
                 self.indi[num].famc_fid.add(
-                    (
-                        self.fam[famc].husb_fid,
-                        self.fam[famc].wife_fid,
-                    )
+                    (self.fam[famc].husb_fid, self.fam[famc].wife_fid)
                 )
             for fams in self.indi[num].fams_num:
                 self.indi[num].fams_fid.add(
-                    (
-                        self.fam[fams].husb_fid,
-                        self.fam[fams].wife_fid,
-                    )
+                    (self.fam[fams].husb_fid, self.fam[fams].wife_fid)
                 )
